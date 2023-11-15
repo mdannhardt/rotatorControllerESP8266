@@ -1,0 +1,5 @@
+*
+!*.ino
+!*.c
+!*.h
+!.gitignore
