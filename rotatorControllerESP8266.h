@@ -8,6 +8,8 @@
 #ifndef ROTATORCONTROLLERESP8266_H_
 #define ROTATORCONTROLLERESP8266_H_
 
+#define DNS_PORT 53
+
 enum CMD {
 	NONE, PARK,     // not implemented
 	STOP,           // stop rotation

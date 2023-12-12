@@ -11,15 +11,40 @@
  * digital outputs to run the rotator motor. While rotating, the program monitors the current bearing to determine
  * when to stop while also monitoring for a stuck rotation condition.
  *
- * 1.0.0 2023-11-12 Original release.
+ * 1.0.0 2023-12-12 Original release.
  *
  */
+
+/* ----------------- WiFi Configuration --------------------------------------------------
+ *
+ * Un-comment the #define PROVIDE_AP to configure the ESP8266 to offer a DNS hotspot to
+ *             which computers can connect.
+ * Set the ssid to the name of the router or hotspot to which the ESP8266 should connect
+ *             to or offer
+ * Set the password as needed.
+*/
+
+//#define PROVIDE_AP
+const char *ssid = "HexRotator";
+const char *password = "12345678";
+
+/* ------------------- End Configuration ------------------------------------------------ */
+
 
 #include "rotatorControllerESP8266.h"
 
 #include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#include <vector>
 #include <WiFiUdp.h>
 #include <Wire.h>
+
+//#define DEBUG
+#ifdef DEBUG
+ #define DBG
+#else
+ #define DBG for(;0;)
+#endif
 
 #define USE_DECLINATION
 
@@ -31,9 +56,6 @@
 #endif
 
 const char *version = "BuddiHex Rotator Firmware version 1.0.0";
-
-const char *ssid = "HexRotator";
-const char *password = "12345678";
 
 // Program constants
 const int ROTATE_CW = 15;  // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
@@ -49,9 +71,12 @@ String cmdWord[MAX_CMDS] = { "NONE", "PARK", "STOP", "SET_BEARING", "GET_PST_BEA
 boolean rotating = false; // true means the antenna is being commanded to rotate
 boolean clockwise = true; // direction of rotation. Clockwise means degrees are increasing, 0 to 359. Valid only if rotation==true
 boolean stuck = false;    // true after a stuck rotator detected. Cleared on next bearing command.
+boolean wrapped = false;  // rotator has crossed over due south
 int targetBearing;        // in degrees.
-unsigned long timeStart;  // used to check for stuck rotator
-int lastBearing;          // used to check for stuck rotator
+unsigned long stuckTimer;  // used to check for stuck rotator
+unsigned long checkRotationTimer;
+int stuckBearingCheck;    // used to check for stuck rotator
+int lastBearing;
 
 #ifdef COMPASS_OFFICAL
 QMC5883LCompass compass;
@@ -71,7 +96,6 @@ int Declination = -11;
 int Azimuth = 0;
 int getAzimuth()
 {
-//	Serial.print("compass.getAzimuth() = ");
 #ifdef COMPASS_OFFICAL
 	Azimuth = compass.getAzimuth();
 #else
@@ -106,6 +130,30 @@ int transform( int in )
 	return in;
 }
 
+#ifdef PROVIDE_AP
+	// Functions to support the ESP8266 acting as DNS and connection AP
+static DNSServer DNS;
+
+void createWiFiAP() {
+	Serial.println();
+	Serial.println();
+
+	// create access point
+	while (!WiFi.softAP(ssid, password, 6, false, 15)) {
+		delay(500);
+	}
+
+	// start dns server
+	if (!DNS.start(DNS_PORT, ssid, WiFi.softAPIP()))
+		Serial.printf("\n failed to start dns service \n");
+
+	Udp.begin(4210);
+}
+
+#else
+/*
+ * Connect to a router/hotspot AP
+ */
 void connectWiFi() {
 	Serial.println();
 	Serial.println();
@@ -127,7 +175,11 @@ void connectWiFi() {
 			WiFi.localIP().toString().c_str(), localUdpPort);
 	Serial.println(); // no trailing \n from the above printf() ?
 }
+#endif
 
+/*
+ *
+ */
 void setup() {
 	Serial.begin(115200);
 	delay(10);
@@ -148,30 +200,48 @@ void setup() {
 		Serial.print(".");
 		delay(100);
 	}
-	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
+
+DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
 #endif
 
+#ifdef PROVIDE_AP
+	createWiFiAP();
+#else
 	connectWiFi();
+#endif
 
 	// Declaring L293D Motor Controller control pins as Output
 	pinMode(ROTATE_CW, OUTPUT);
 	pinMode(ROTATE_CCW, OUTPUT);
 }
 
+/*
+ *
+ */
 void loop() {
 	CMD command = NONE;
 
 	if (rotating == true)
-		checkRotateComplete();
+	{
+		unsigned long timeCurrent = millis();
+		if (checkRotationTimer > timeCurrent) // roll over. Just rest and ignore this interval
+			checkRotationTimer = timeCurrent;
+		if (timeCurrent - checkRotationTimer > 1)
+			checkRotateComplete();
+	}
 
+#ifdef PROVIDE_AP
+	DNS.processNextRequest();
+#else
 	if (WiFi.status() != WL_CONNECTED)
 		connectWiFi();
+#endif
 
 	int packetSize = Udp.parsePacket();
 	if (packetSize) {
 		// receive incoming UDP packets
-//		Serial.printf("Received %d bytes from %s, port %d\n", packetSize,
-//				Udp.remoteIP().toString().c_str(), Udp.remotePort());
+//DBG		Serial.printf("Received %d bytes from %s, port %d\n", packetSize, \
+				Udp.remoteIP().toString().c_str(), Udp.remotePort());
 		int len = Udp.read(incomingPacket, MAX_UDP_PACKET_SZ);
 		if (len > 0) {
 			incomingPacket[len] = 0; // terminate
@@ -188,7 +258,7 @@ void loop() {
 	case PARK: // ignore
 		return;
 	case STOP:
-		rotateStop();
+		rotateStop(0);
 		break;
 	case GET_PST_BEARING:
 		cmdRsp = "AZ:" + String(getAzimuth());
@@ -224,13 +294,21 @@ void loop() {
 /*
  * Stop the antenna from rotating
  */
-void rotateStop() {
+void rotateStop(int why) {
 	digitalWrite(LED_BUILTIN, LOW);
 	rotating = false; // done
 	digitalWrite(ROTATE_CW, LOW);
 	digitalWrite(ROTATE_CCW, LOW);
 
-	Serial.println("Rotate stop");
+	Serial.print("Rotate stop." );
+	switch(why) {
+	case 0: Serial.println(""); break;
+	case 1: Serial.println(" CW complete"); break;
+	case 2: Serial.println(" CCW complete"); break;
+	case 3: Serial.println(" CW complete or reverse!"); break;
+	case 4: Serial.println(" CCW complete or reverse!"); break;
+	case 5: Serial.println(" STUCK"); break;
+	}
 }
 
 /*
@@ -238,12 +316,7 @@ void rotateStop() {
  */
 void rotate() {
 	// Make sure stopped
-	rotateStop();
-
-	int currentBearing = getAzimuth();
-
-	// Determine rotation
-	clockwise = transform(targetBearing) > transform(currentBearing) ? true : false;
+	rotateStop(0);
 
 	// Set the digital outputs to start rotating in the desired direction
 	digitalWrite(ROTATE_CW, !clockwise);
@@ -258,7 +331,7 @@ void rotate() {
 	Serial.println(); // no trailing \n from the above printf() ?
 
 	// Setup to check for a stuck rotator
-	timeStart = millis();
+	stuckTimer = checkRotationTimer = millis();
 	lastBearing = getAzimuth();
 }
 
@@ -271,33 +344,62 @@ void checkRotateComplete() {
 	// get the current bearing
 	int currentBearing = getAzimuth();
 
-	// Consider the target reached once the rotator bearing has pasted the target.
-	if ( clockwise && transform(currentBearing) > transform(targetBearing))
-		rotateStop();
-	else if (!clockwise && transform(currentBearing) < transform(targetBearing))
-		rotateStop();
+	if (wrapped)
+	{
+		// continue until unwrapped
+		if ( clockwise && (transform(currentBearing) < 5) )
+			wrapped = false;
+		if ( !clockwise && (transform(currentBearing) > 355) )
+			wrapped = false;
+#ifdef DEBUG
+		if (wrapped==false) {
+			Serial.printf("c=%d(%d), l=%d(%d). Unwrapped", currentBearing, transform(currentBearing), lastBearing, transform(lastBearing) );
+			Serial.println();
+		}
+#endif
+	}
+	else
+	{
+		// Consider the target reached once the rotator bearing has pasted the target.
+		if ( clockwise && (transform(currentBearing) > (transform(targetBearing) + 5)))
+			rotateStop(1);
+		else if (!clockwise && ((transform(currentBearing) + 5) < transform(targetBearing)))
+			rotateStop(2);
 
-	// Or passing over Southern heading or somehow goes in wrong direction;
-	if ( clockwise && transform(currentBearing) + STUCK_DEG < transform(lastBearing))
-		rotateStop();
-	else if (!clockwise && transform(lastBearing) + STUCK_DEG < transform(currentBearing))
-		rotateStop();
+		// Or passing over Southern heading or somehow goes in wrong direction;
+		if ( clockwise && ((transform(currentBearing) + 5) < transform(lastBearing)))
+			rotateStop(3);
+		else if (!clockwise && (transform(currentBearing) > (transform(lastBearing) + 5)))
+			rotateStop(4);
+	}
+
+#ifdef DEBUG
+   if ( !rotating) { // debug
+		Serial.printf("c=%d(%d), t=%d(%d), l=%d(%d) %s\n",
+				currentBearing, transform(currentBearing),
+				targetBearing,transform(targetBearing),
+				lastBearing, transform(lastBearing),
+				wrapped ? " wrapped": "");
+		Serial.println("");
+	}
+#endif
+
+	lastBearing = currentBearing;
 
 	// If still rotating, check if stuck
 	if (rotating) {
 		unsigned long timeCurrent = millis();
-		if (timeStart > timeCurrent) // roll over. Just rest and ignore this interval
-			timeStart = timeCurrent;
-		if (timeCurrent - timeStart > STUCK_TIME) {
+		if (stuckTimer > timeCurrent) // roll over. Just rest and ignore this interval
+			stuckTimer = timeCurrent;
+		if (timeCurrent - stuckTimer > STUCK_TIME) {
 			// time to check for rotation
-			if (abs(currentBearing - lastBearing) < STUCK_DEG) {
-				rotateStop(); // stuck
+			if (abs(currentBearing - stuckBearingCheck) < STUCK_DEG) {
+				rotateStop(5); // stuck
 				stuck = true;
-				Serial.println("ERR:Stuck rotator!");
 			} else {
-				// still moving. reset timer and current location
-				lastBearing = currentBearing;
-				timeStart = timeCurrent;
+				// still moving. reset timer and bearing
+				stuckBearingCheck = currentBearing;
+				stuckTimer = timeCurrent;
 			}
 		}
 	}
@@ -311,6 +413,31 @@ CMD setNewBearing(int bearing)
 	if (bearing < 0 || bearing > 360)
 		Serial.println("ERR:New bearing degrees out of range.");
 	else {
+		int currentBearing = getAzimuth();
+
+		// Determine rotation direction
+		boolean priorClockwise = clockwise;
+		int priorTarget = targetBearing;
+
+		// if pointing to the southern hemi, check for wrap
+		if ( currentBearing > 90 && currentBearing < 270 ) {
+			if ( priorClockwise && (transform(currentBearing) <= transform(priorTarget)))
+				wrapped = true;
+			if ( !priorClockwise && (transform(currentBearing) > transform(priorTarget)))
+				wrapped = true;
+		}
+
+		clockwise = transform(bearing) > transform(currentBearing) ? true : false;
+		if (wrapped && !stuck)
+			clockwise = !clockwise; // unwrap direction instead
+
+DBG		Serial.printf("Prior %d(%d). Turning %s from %d(%d) to %d(%d). %s %s\n", \
+				priorTarget, transform(priorTarget), \
+				clockwise ? "CW":"CCW", \
+				currentBearing, transform(currentBearing), bearing, transform(bearing), \
+				wrapped ? "wrapped" : "", stuck ? "stuck" : "" ); \
+		Serial.println("");
+
 		targetBearing = bearing;
 		stuck = false;
 		return SET_BEARING;
@@ -344,8 +471,7 @@ CMD processCommand(String inputString) {
 	else if ( inputString.indexOf("<PST><STOP>") != -1)
 		return STOP;
 	else if ( inputString.indexOf("<PST><PARK>") != -1) {
-		targetBearing = 0;
-		return SET_BEARING;
+		return setNewBearing( 0 );
 	}
 	else if (inputString.startsWith("<PST>AZ?"))
 		return GET_PST_BEARING;
