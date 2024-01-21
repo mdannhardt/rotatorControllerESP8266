@@ -39,7 +39,7 @@ const char *password = "12345678";
 #include <WiFiUdp.h>
 #include <Wire.h>
 
-//#define DEBUG
+#define DEBUG
 #ifdef DEBUG
  #define DBG
 #else
@@ -226,8 +226,11 @@ void loop() {
 		unsigned long timeCurrent = millis();
 		if (checkRotationTimer > timeCurrent) // roll over. Just rest and ignore this interval
 			checkRotationTimer = timeCurrent;
-		if (timeCurrent - checkRotationTimer > 1)
+		if (timeCurrent - checkRotationTimer > 1000)
+		{
 			checkRotateComplete();
+			checkRotationTimer = millis();
+		}
 	}
 
 #ifdef PROVIDE_AP
@@ -300,14 +303,21 @@ void rotateStop(int why) {
 	digitalWrite(ROTATE_CW, LOW);
 	digitalWrite(ROTATE_CCW, LOW);
 
+	if (why == 6) {
+		// Stopping prior to starting new rotation.
+		Serial.println("Rotate stop." );
+		return;
+	}
+
 	Serial.print("Rotate stop." );
 	switch(why) {
-	case 0: Serial.println(""); break;
+	case 0: Serial.println(" CMD"); break;
 	case 1: Serial.println(" CW complete"); break;
 	case 2: Serial.println(" CCW complete"); break;
 	case 3: Serial.println(" CW complete or reverse!"); break;
 	case 4: Serial.println(" CCW complete or reverse!"); break;
 	case 5: Serial.println(" STUCK"); break;
+	case 6: Serial.println(""); break;
 	}
 }
 
@@ -316,7 +326,7 @@ void rotateStop(int why) {
  */
 void rotate() {
 	// Make sure stopped
-	rotateStop(0);
+	rotateStop(6);
 
 	// Set the digital outputs to start rotating in the desired direction
 	digitalWrite(ROTATE_CW, !clockwise);
@@ -360,7 +370,7 @@ void checkRotateComplete() {
 	}
 	else
 	{
-		// Consider the target reached once the rotator bearing has pasted the target.
+		// Consider the target reached once the rotator bearing has passed the target.
 		if ( clockwise && (transform(currentBearing) > (transform(targetBearing) + 5)))
 			rotateStop(1);
 		else if (!clockwise && ((transform(currentBearing) + 5) < transform(targetBearing)))
@@ -431,7 +441,7 @@ CMD setNewBearing(int bearing)
 		if (wrapped && !stuck)
 			clockwise = !clockwise; // unwrap direction instead
 
-DBG		Serial.printf("Prior %d(%d). Turning %s from %d(%d) to %d(%d). %s %s\n", \
+DBG		Serial.printf("priorTarget(). Prior %d(%d). Turning %s from %d(%d) to %d(%d). %s %s\n", \
 				priorTarget, transform(priorTarget), \
 				clockwise ? "CW":"CCW", \
 				currentBearing, transform(currentBearing), bearing, transform(bearing), \
