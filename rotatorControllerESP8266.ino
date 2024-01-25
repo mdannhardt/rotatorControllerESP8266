@@ -12,6 +12,7 @@
  * when to stop while also monitoring for a stuck rotation condition.
  *
  * 1.0.0 2023-12-12 Original release.
+ * 1.0.1 2024-01-24 Fix cable wrap at S end issues.
  *
  */
 
@@ -46,7 +47,7 @@ const char *password = "12345678";
  #define DBG for(;0;)
 #endif
 
-#define USE_DECLINATION
+//#define USE_DECLINATION
 
 //#define COMPASS_OFFICAL // if defined, use QMC5883LCompass library, otherwise use QMC5883L library
 #ifdef COMPASS_OFFICAL
@@ -55,13 +56,15 @@ const char *password = "12345678";
 #include <QMC5883L.h>
 #endif
 
-const char *version = "BuddiHex Rotator Firmware version 1.0.0";
+const char *version = "BuddiHex Rotator Firmware version 1.0.1beta";
 
 // Program constants
-const int ROTATE_CW = 15;  // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
-const int ROTATE_CCW = 13; // GPIO-13 of NodeMCU esp8266 connecting to IN2 of L293D
+const int ROTATE_CCW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
+const int ROTATE_CW  = 13; // GPIO-13 of NodeMCU esp8266 connecting to IN2 of L293D
 
-const unsigned long STUCK_TIME = 3000; // msecs w/o rotation to declare stuck
+
+const unsigned long ROTATE_CHK_TIME = 100; // msecs between check for rotation completion.
+const unsigned long STUCK_TIME = 5000; // msecs w/o rotation to declare stuck
 const unsigned long STUCK_DEG = 5;     // Min degrees that are expected to rotate through w/in STUCK_TIME
 const int MAX_UDP_PACKET_SZ = 255;
 
@@ -71,6 +74,7 @@ String cmdWord[MAX_CMDS] = { "NONE", "PARK", "STOP", "SET_BEARING", "GET_PST_BEA
 boolean rotating = false; // true means the antenna is being commanded to rotate
 boolean clockwise = true; // direction of rotation. Clockwise means degrees are increasing, 0 to 359. Valid only if rotation==true
 boolean stuck = false;    // true after a stuck rotator detected. Cleared on next bearing command.
+WIRE_SIDE wireSide = UNKNWN;
 boolean wrapped = false;  // rotator has crossed over due south
 int targetBearing;        // in degrees.
 unsigned long stuckTimer;  // used to check for stuck rotator
@@ -100,7 +104,7 @@ int getAzimuth()
 	Azimuth = compass.getAzimuth();
 #else
 	if ( compass.ready() )
-		Azimuth = compass.readHeading();
+		Azimuth = compass.readHeading(); // returns 1 - 360
 	else
 		return Azimuth;
 #endif
@@ -109,25 +113,33 @@ int getAzimuth()
 	if ( Azimuth + Declination < 0 )
 		Azimuth = 360 + (Azimuth + Declination);
 	else if ( Azimuth + Declination > 360 )
-		Azimuth = Azimuth - 360;
+		Azimuth = Azimuth + Declination - 360;
 	else
 		Azimuth += Declination;
 #endif
+
+	if (abs(Azimuth - 270) <= 45)
+		wireSide = WEST;
+	if (abs(Azimuth - 90) <= 45)
+		wireSide = EAST;
 
 	return Azimuth;
 }
 
 /**
- * Transform the N=359/0 and S=180/179 into 0 to 350 with S-N-S being 0-180-360
+ * Transform the N=360/1 and S=180/179 into 0 to 359 with S-N-S being 0-180-359
  */
 int transform( int in )
 {
-	if ( in >= 180 && in < 360 )
-		in -= 180;
+	int out;
+	if ( in == 180 || in == 360)
+		out = 180;
+	if ( in > 180 && in < 360 )
+		out = in - 180;
 	else
-		in += 180;
+		out = in + 179;
 
-	return in;
+	return out;
 }
 
 #ifdef PROVIDE_AP
@@ -221,12 +233,18 @@ DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
 void loop() {
 	CMD command = NONE;
 
+	if ( digitalRead(ROTATE_CW) && digitalRead(ROTATE_CCW))
+	{
+		rotateStop(6);
+		Serial.println("PANIC!! Both pins high!!");
+	}
+
 	if (rotating == true)
 	{
 		unsigned long timeCurrent = millis();
 		if (checkRotationTimer > timeCurrent) // roll over. Just rest and ignore this interval
 			checkRotationTimer = timeCurrent;
-		if (timeCurrent - checkRotationTimer > 1000)
+		if (timeCurrent - checkRotationTimer > ROTATE_CHK_TIME)
 		{
 			checkRotateComplete();
 			checkRotationTimer = millis();
@@ -278,7 +296,7 @@ void loop() {
 		rotate();
 		break;
 	case CAL_DECL:
-		calculate_declination();
+		calculateDeclination();
 		break;
 	default:
 		cmdRsp = "ERR:BUG:bad command in loop()!" + String(incomingPacket);
@@ -311,18 +329,19 @@ void rotateStop(int why) {
 
 	Serial.print("Rotate stop." );
 	switch(why) {
-	case 0: Serial.println(" CMD"); break;
+	case 0:
+		Serial.println(" CMD"); break;
 	case 1: Serial.println(" CW complete"); break;
 	case 2: Serial.println(" CCW complete"); break;
-	case 3: Serial.println(" CW complete or reverse!"); break;
-	case 4: Serial.println(" CCW complete or reverse!"); break;
+	case 3: Serial.println(" CW bump complete"); break;
+	case 4: Serial.println(" CCW bump complete"); break;
 	case 5: Serial.println(" STUCK"); break;
 	case 6: Serial.println(""); break;
 	}
 }
 
 /*
- * Select the rotation direction and start the rotation
+ * Start the rotation
  */
 void rotate() {
 	// Make sure stopped
@@ -334,15 +353,34 @@ void rotate() {
 	digitalWrite(LED_BUILTIN, HIGH);
 	rotating = true;
 
-	if ( clockwise )
-		Serial.printf("Rotate CW to %d\n", targetBearing);
-	else
-		Serial.printf("Rotate CCW to %d\n", targetBearing);
-	Serial.println(); // no trailing \n from the above printf() ?
+	Serial.printf("Rotate %s to %d", clockwise ? "CW" : "CCW", targetBearing);	Serial.println();
 
 	// Setup to check for a stuck rotator
 	stuckTimer = checkRotationTimer = millis();
-	lastBearing = getAzimuth();
+}
+
+/*
+ * Select the rotation direction and start the rotation
+ */
+void bumpRotate(int newBearing, int currenBearing) {
+	if (newBearing == currenBearing)
+		return;
+
+	bool cw = transform(newBearing) > transform(currenBearing);
+
+	// Make sure stopped
+	rotateStop(6);
+
+	Serial.printf("Rotate %s (bump)", clockwise ? "CW" : "CCW"); Serial.println();
+
+	// Set the digital outputs to start rotating in the desired direction
+	digitalWrite(ROTATE_CW, !cw);
+	digitalWrite(ROTATE_CCW, cw);
+	digitalWrite(LED_BUILTIN, HIGH);
+	rotating = true;
+
+	delay(250);
+	rotateStop(cw ? 3 : 4);
 }
 
 /*
@@ -354,47 +392,68 @@ void checkRotateComplete() {
 	// get the current bearing
 	int currentBearing = getAzimuth();
 
-	if (wrapped)
-	{
-		// continue until unwrapped
-		if ( clockwise && (transform(currentBearing) < 5) )
-			wrapped = false;
-		if ( !clockwise && (transform(currentBearing) > 355) )
-			wrapped = false;
-#ifdef DEBUG
-		if (wrapped==false) {
-			Serial.printf("c=%d(%d), l=%d(%d). Unwrapped", currentBearing, transform(currentBearing), lastBearing, transform(lastBearing) );
-			Serial.println();
-		}
-#endif
-	}
-	else
-	{
-		// Consider the target reached once the rotator bearing has passed the target.
-		if ( clockwise && (transform(currentBearing) > (transform(targetBearing) + 5)))
-			rotateStop(1);
-		else if (!clockwise && ((transform(currentBearing) + 5) < transform(targetBearing)))
-			rotateStop(2);
+	// Logical based on hemisphere to avoid compass discontinuity
+	bool west = (currentBearing > 179 && currentBearing <= 360);
+	bool south = (currentBearing > 90 && currentBearing < 270);
+	int currentBearingT = transform(currentBearing); // used in N
+	int  targetBearingT = transform( targetBearing); // used in N
 
-		// Or passing over Southern heading or somehow goes in wrong direction;
-		if ( clockwise && ((transform(currentBearing) + 5) < transform(lastBearing)))
-			rotateStop(3);
-		else if (!clockwise && (transform(currentBearing) > (transform(lastBearing) + 5)))
-			rotateStop(4);
+	// Ignore completion checks until unwrapped)
+	wrapped = south ? wrapped : false; // never wrapped if in the N
+	if ( wrapped == true )
+	{
+		if (wireSide == WEST)
+			wrapped = ( clockwise && west);//currentBearingT < 180 );
+		else
+			wrapped = ( !clockwise && !west); //currentBearingT > 179);
 	}
 
 #ifdef DEBUG
-   if ( !rotating) { // debug
-		Serial.printf("c=%d(%d), t=%d(%d), l=%d(%d) %s\n",
-				currentBearing, transform(currentBearing),
-				targetBearing,transform(targetBearing),
-				lastBearing, transform(lastBearing),
-				wrapped ? " wrapped": "");
+	if (wrapped == true)
+	{
+		Serial.printf("checkRotateComplete(). Unwrapping in %s %s from %d(%d) to %d(%d). %s.", \
+				south ? "S" : "N", clockwise ? "CW":"CCW", \
+				currentBearing, currentBearingT, targetBearing, targetBearingT, \
+				wireSide == EAST ? "wire east side" : wireSide == WEST ? "wire west side" : "?" ); \
 		Serial.println("");
 	}
 #endif
 
-	lastBearing = currentBearing;
+	if ( wrapped == false )
+	{
+		// Consider the target reached once the rotator bearing has passed the target.
+		if ( south && west)
+		{
+			// S hemi easy using compass bearings (not transformed bearings)
+			if (clockwise && wireSide == EAST && (currentBearing >= targetBearing) )
+				rotateStop(1);
+			if (!clockwise && currentBearing <= targetBearing)
+				rotateStop(2);
+			// following checks case where target is in the E thus between 1 and 179.
+			// The 315 check ensures switch to N hemi logic
+			if (clockwise && (currentBearing >= (targetBearing < 180 ? 315 : targetBearing) ))
+				rotateStop(1);
+		}
+		else if ( south && !west)
+		{
+			if (!clockwise && wireSide == WEST && (currentBearing <= targetBearing) )
+				rotateStop(2);
+			if (clockwise && currentBearing >= targetBearing)
+				rotateStop(1);
+			if (!clockwise && (currentBearing <= (targetBearing > 180 ? 45 : targetBearing) ))
+				rotateStop(2);
+		}
+		else
+		{
+			// north hemi
+			if (clockwise && (currentBearingT >= targetBearingT)) {
+				rotateStop(1);
+			} else if (!clockwise && (currentBearingT <= targetBearingT)) {
+				rotateStop(2);
+			}
+		}
+
+	}
 
 	// If still rotating, check if stuck
 	if (rotating) {
@@ -413,43 +472,64 @@ void checkRotateComplete() {
 			}
 		}
 	}
+
+#ifdef DEBUG
+   if ( !rotating) { // debug
+		Serial.printf("rotating %s stopped in %s%s: c=%d(%d), t=%d(%d) %s",
+				clockwise ? "CW" : "CCW",
+				south ? "S" : "N",
+				west ? "W" : "E",
+				currentBearing, currentBearingT,
+				targetBearing, transform(targetBearing),
+				wrapped ? "wrapped" : "");
+		Serial.println("");
+		Serial.println("----------------");
+		Serial.println("");
+	}
+#endif
 }
 
 /*
  * Check and set a new bearing
  */
-CMD setNewBearing(int bearing)
+CMD setNewBearing(int newBearing)
 {
-	if (bearing < 0 || bearing > 360)
+	if (newBearing < 0 || newBearing > 360)
 		Serial.println("ERR:New bearing degrees out of range.");
-	else {
+	else
+	{
+		newBearing = newBearing == 0 ? 1 : newBearing; // Range is 1 to 360 but allow 0
+
 		int currentBearing = getAzimuth();
 
-		// Determine rotation direction
-		boolean priorClockwise = clockwise;
-		int priorTarget = targetBearing;
-
-		// if pointing to the southern hemi, check for wrap
-		if ( currentBearing > 90 && currentBearing < 270 ) {
-			if ( priorClockwise && (transform(currentBearing) <= transform(priorTarget)))
-				wrapped = true;
-			if ( !priorClockwise && (transform(currentBearing) > transform(priorTarget)))
-				wrapped = true;
+		// If current bearing already close to new bearing, rotate on time
+		if ( abs(transform(newBearing) - transform(currentBearing)) < 5 )
+		{
+			// bump for one second
+			bumpRotate(newBearing, currentBearing);
+			return NONE;
 		}
 
-		clockwise = transform(bearing) > transform(currentBearing) ? true : false;
-		if (wrapped && !stuck)
-			clockwise = !clockwise; // unwrap direction instead
+		// Adjust the target slightly to compensate for overshoot
+		newBearing = newBearing + (newBearing < 180 ? -3 : +3);
+		if (newBearing <   1) newBearing = 360 + newBearing;  //  0 -> 360
+		if (newBearing > 360) newBearing = newBearing - 1;    // 360 -> 1
 
-DBG		Serial.printf("priorTarget(). Prior %d(%d). Turning %s from %d(%d) to %d(%d). %s %s\n", \
-				priorTarget, transform(priorTarget), \
+		clockwise = transform(newBearing) > transform(currentBearing) ? true : false;
+		// Set off in opposite direction if wrapped.
+		if ( clockwise && wireSide == EAST && currentBearing > 179 && currentBearing < 315) clockwise = false;
+		if (!clockwise && wireSide == WEST && currentBearing < 180 && currentBearing > 45) clockwise = true;
+
+DBG		Serial.printf("setNewBearing(). Turning %s from %d(%d) to %d(%d). %s.", \
 				clockwise ? "CW":"CCW", \
-				currentBearing, transform(currentBearing), bearing, transform(bearing), \
-				wrapped ? "wrapped" : "", stuck ? "stuck" : "" ); \
+				currentBearing, transform(currentBearing), newBearing, transform(newBearing), \
+				wireSide == EAST ? "wire east side" : wireSide == WEST ? "wire west side" : "?" ); \
 		Serial.println("");
 
-		targetBearing = bearing;
+		targetBearing = newBearing;
+
 		stuck = false;
+		wrapped = true; // assume true until confirmed not.
 		return SET_BEARING;
 	}
 	return NONE;
@@ -522,8 +602,9 @@ int getData(String inputString) {
 /*
  * Calculate a new declination. The assumption is that the rotator is actually pointing true North.
  */
-void calculate_declination()
+void calculateDeclination()
 {
+#ifdef USE_DECLINATION
 	// get the current bearing
 	int currentBearing;
 
@@ -541,5 +622,9 @@ void calculate_declination()
 
 	Serial.printf("Current bearing: %d. New Declination: %d.", currentBearing, Declination);
 	Serial.println();
+#else
+	Serial.println("USE_DECLINATION not defined");
+	Serial.println();
+#endif
 }
 

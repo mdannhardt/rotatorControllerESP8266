@@ -20,11 +20,15 @@ enum CMD {
 	MAX_CMDS
 };
 
+enum WIRE_SIDE {
+	UNKNWN, EAST, WEST, MAX_SIDES
+};
+
 // Function prototype forward declarations
 CMD processCommand(String inputString);
 int findData(String inputString);
 int getData(String inputString);
 void checkRotateComplete();
-void calculate_declination();
+void calculateDeclination();
 
 #endif /* ROTATORCONTROLLERESP8266_H_ */
