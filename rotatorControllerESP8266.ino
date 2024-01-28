@@ -12,7 +12,10 @@
  * when to stop while also monitoring for a stuck rotation condition.
  *
  * 1.0.0 2023-12-12 Original release.
- * 1.0.1 2024-01-24 Fix cable wrap at S end issues.
+ * 1.0.1 2024-01-27 Fix cable wrap at S end issues.
+ *                  Declination fix.
+ *                  Allow for compass mount 90degrees issue.
+ *                  Do "timed"rotations (bumps) if commanded heading is within +/- current target or heading
  *
  */
 
@@ -47,7 +50,8 @@ const char *password = "12345678";
  #define DBG for(;0;)
 #endif
 
-//#define USE_DECLINATION
+#define USE_DECLINATION
+#define QMC5883_AT_90
 
 //#define COMPASS_OFFICAL // if defined, use QMC5883LCompass library, otherwise use QMC5883L library
 #ifdef COMPASS_OFFICAL
@@ -59,13 +63,12 @@ const char *password = "12345678";
 const char *version = "BuddiHex Rotator Firmware version 1.0.1beta";
 
 // Program constants
-const int ROTATE_CCW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
-const int ROTATE_CW  = 13; // GPIO-13 of NodeMCU esp8266 connecting to IN2 of L293D
-
+const int ROTATE_CW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
+const int ROTATE_CCW  = 13; // GPIO-13 of NodeMCU esp8266 connecting to IN2 of L293D
 
 const unsigned long ROTATE_CHK_TIME = 100; // msecs between check for rotation completion.
-const unsigned long STUCK_TIME = 5000; // msecs w/o rotation to declare stuck
-const unsigned long STUCK_DEG = 5;     // Min degrees that are expected to rotate through w/in STUCK_TIME
+const unsigned long STUCK_TIME = 5000;     // msecs w/o rotation to declare stuck
+const unsigned long STUCK_DEG = 5;         // Min degrees that are expected to rotate through w/in STUCK_TIME
 const int MAX_UDP_PACKET_SZ = 255;
 
 // String representations of all possible commands (used in messages)
@@ -80,7 +83,6 @@ int targetBearing;        // in degrees.
 unsigned long stuckTimer;  // used to check for stuck rotator
 unsigned long checkRotationTimer;
 int stuckBearingCheck;    // used to check for stuck rotator
-int lastBearing;
 
 #ifdef COMPASS_OFFICAL
 QMC5883LCompass compass;
@@ -94,50 +96,69 @@ char incomingPacket[MAX_UDP_PACKET_SZ];  // buffer for incoming packets
 char replyPacket[MAX_UDP_PACKET_SZ];     // a reply string to send back
 
 #ifdef USE_DECLINATION
-int Declination = -11;
+int Declination = 0;
 #endif
 
-int Azimuth = 0;
 int getAzimuth()
 {
+	int azimuth = 0;
 #ifdef COMPASS_OFFICAL
-	Azimuth = compass.getAzimuth();
+	azimuth = compass.getAzimuth();
 #else
 	if ( compass.ready() )
-		Azimuth = compass.readHeading(); // returns 1 - 360
+		azimuth = compass.readHeading(); // returns 1 - 360
 	else
-		return Azimuth;
+		return azimuth;
+#endif
+
+	int currentBearing = azimuth;
+
+#ifdef QMC5883_AT_90
+	azimuth -= 90;
+	if ( azimuth <= 0 )
+		azimuth += 360;
 #endif
 
 #ifdef USE_DECLINATION
-	if ( Azimuth + Declination < 0 )
-		Azimuth = 360 + (Azimuth + Declination);
-	else if ( Azimuth + Declination > 360 )
-		Azimuth = Azimuth + Declination - 360;
+	azimuth += Declination;
+	if ( azimuth < 0 )
+		azimuth = 360 + azimuth;
+	if ( azimuth > 360 )
+		azimuth = azimuth - 360;
 	else
-		Azimuth += Declination;
 #endif
 
-	if (abs(Azimuth - 270) <= 45)
+	if (abs(azimuth - 270) <= 45)
 		wireSide = WEST;
-	if (abs(Azimuth - 90) <= 45)
+	if (abs(azimuth - 90) <= 45)
 		wireSide = EAST;
 
-	return Azimuth;
+//	Serial.printf("c = %d, a = %d, t = %d", currentBearing, azimuth, transform(currentBearing));
+//	Serial.printf("%d", azimuth);
+//	Serial.println("");
+
+	return azimuth;
 }
 
 /**
- * Transform the N=360/1 and S=180/179 into 0 to 359 with S-N-S being 0-180-359
+ * Transform the sensor's coordinates N=1 and S=180/179 into rotator coordinated; 0 to 359 with S-N-S
+ * being 0-180-359. The in general, the 0-359 transformed coordinate system is used to determine rotation
+ * direction to avoid the 360/1 discontinuity of the sensor and is used while looking for the target reached
+ * while in the northern hemisphere. The sensor's coordinate system is used while looking for target reached
+ * while in the southern hemisphere.
+ *
+ * sensor: N = 360 -> transformed: 179
+ * sensor: 180 to 359 -> transformed: 0 - 179
+ * sensor: 1 to 179 -> transformed: 181 - 359
  */
 int transform( int in )
 {
 	int out;
-	if ( in == 180 || in == 360)
-		out = 180;
-	if ( in > 180 && in < 360 )
-		out = in - 180;
+
+	if ( in > 0 && in < 180 )
+		out = in + 180;
 	else
-		out = in + 179;
+		out = in - 180;
 
 	return out;
 }
@@ -371,7 +392,7 @@ void bumpRotate(int newBearing, int currenBearing) {
 	// Make sure stopped
 	rotateStop(6);
 
-	Serial.printf("Rotate %s (bump)", clockwise ? "CW" : "CCW"); Serial.println();
+	Serial.printf("Rotate %s (bump)", cw ? "CW" : "CCW"); Serial.println();
 
 	// Set the digital outputs to start rotating in the desired direction
 	digitalWrite(ROTATE_CW, !cw);
@@ -392,20 +413,23 @@ void checkRotateComplete() {
 	// get the current bearing
 	int currentBearing = getAzimuth();
 
+	if ( currentBearing == 0 ) // ?? !compass.ready() ??
+		return;
+
 	// Logical based on hemisphere to avoid compass discontinuity
 	bool west = (currentBearing > 179 && currentBearing <= 360);
 	bool south = (currentBearing > 90 && currentBearing < 270);
 	int currentBearingT = transform(currentBearing); // used in N
 	int  targetBearingT = transform( targetBearing); // used in N
 
-	// Ignore completion checks until unwrapped)
+	// Ignore completion checks until unwrapped
 	wrapped = south ? wrapped : false; // never wrapped if in the N
 	if ( wrapped == true )
 	{
 		if (wireSide == WEST)
-			wrapped = ( clockwise && west);//currentBearingT < 180 );
+			wrapped = ( clockwise && currentBearing < 180 );
 		else
-			wrapped = ( !clockwise && !west); //currentBearingT > 179);
+			wrapped = ( !clockwise && currentBearing > 179);
 	}
 
 #ifdef DEBUG
@@ -501,12 +525,16 @@ CMD setNewBearing(int newBearing)
 		newBearing = newBearing == 0 ? 1 : newBearing; // Range is 1 to 360 but allow 0
 
 		int currentBearing = getAzimuth();
+		if (currentBearing == 0 ) // ? compass.ready() ?
+			return NONE;
 
 		// If current bearing already close to new bearing, rotate on time
-		if ( abs(transform(newBearing) - transform(currentBearing)) < 5 )
+		if ( abs(transform(newBearing) - transform(targetBearing)) < 5 &&
+				abs(transform(newBearing) - transform(currentBearing)) < 5)
 		{
 			// bump for one second
-			bumpRotate(newBearing, currentBearing);
+			bumpRotate(newBearing, targetBearing);
+			targetBearing = newBearing;
 			return NONE;
 		}
 
@@ -611,14 +639,22 @@ void calculateDeclination()
 #ifdef COMPASS_OFFICAL
 	currentBearing = compass.getAzimuth();
 #else
-	if ( compass.ready() )
-		currentBearing = compass.readHeading();
+	currentBearing = compass.readHeading();
 #endif
+
+#ifdef QMC5883_AT_90
+	currentBearing -= 90;
+	if ( currentBearing < 0 )
+		currentBearing = 360 + currentBearing;
+#endif
+
+	Serial.printf("Current bearing: %d and Declination: %d.", currentBearing, Declination);
+	Serial.println();
 
 	if ( currentBearing < 180 )
 		Declination = -currentBearing;
 	else
-		Declination = currentBearing - 360;
+		Declination = 360 - currentBearing;
 
 	Serial.printf("Current bearing: %d. New Declination: %d.", currentBearing, Declination);
 	Serial.println();
