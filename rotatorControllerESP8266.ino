@@ -12,7 +12,7 @@
  * when to stop while also monitoring for a stuck rotation condition.
  *
  * 1.0.0 2023-12-12 Original release.
- * 1.0.1 2024-01-27 Fix cable wrap at S end issues.
+ * 1.1.0 2024-02-27 Fix cable wrap at S end issues.
  *                  Declination fix.
  *                  Allow for compass mount 90degrees issue.
  *                  Do "timed"rotations (bumps) if commanded heading is within +/- current target or heading
@@ -34,7 +34,6 @@ const char *password = "12345678";
 
 /* ------------------- End Configuration ------------------------------------------------ */
 
-
 #include "rotatorControllerESP8266.h"
 
 #include <ESP8266WiFi.h>
@@ -43,7 +42,7 @@ const char *password = "12345678";
 #include <WiFiUdp.h>
 #include <Wire.h>
 
-#define DEBUG
+//#define DEBUG
 #ifdef DEBUG
  #define DBG
 #else
@@ -60,7 +59,7 @@ const char *password = "12345678";
 #include <QMC5883L.h>
 #endif
 
-const char *version = "BuddiHex Rotator Firmware version 1.0.1beta";
+const char *version = "BuddiHex Rotator Firmware version 1.1.0";
 
 // Program constants
 const int ROTATE_CW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
@@ -133,9 +132,12 @@ int getAzimuth()
 	if (abs(azimuth - 90) <= 45)
 		wireSide = EAST;
 
-//	Serial.printf("c = %d, a = %d, t = %d", currentBearing, azimuth, transform(currentBearing));
-//	Serial.printf("%d", azimuth);
-//	Serial.println("");
+/*
+	// Dump bearing data
+	Serial.printf("c = %d, a = %d, t = %d", currentBearing, azimuth, transform(currentBearing));
+	Serial.printf("%d", azimuth);
+	Serial.println("");
+*/
 
 	return azimuth;
 }
@@ -387,7 +389,7 @@ void bumpRotate(int newBearing, int currenBearing) {
 	if (newBearing == currenBearing)
 		return;
 
-	bool cw = transform(newBearing) > transform(currenBearing);
+	bool cw = transform(newBearing) > transform(targetBearing);
 
 	// Make sure stopped
 	rotateStop(6);
@@ -400,8 +402,34 @@ void bumpRotate(int newBearing, int currenBearing) {
 	digitalWrite(LED_BUILTIN, HIGH);
 	rotating = true;
 
-	delay(250);
+	delay(100);
 	rotateStop(cw ? 3 : 4);
+
+	targetBearing = newBearing;
+}
+
+bool checkRotationStuck(int currentBearing)
+{
+	// If still rotating, check if stuck
+	if (rotating) {
+		unsigned long timeCurrent = millis();
+		if (stuckTimer > timeCurrent) // roll over. Just rest and ignore this interval
+			stuckTimer = timeCurrent;
+		if (timeCurrent - stuckTimer > STUCK_TIME)
+		{
+			// time to check for rotation
+			if (abs(currentBearing - stuckBearingCheck) < STUCK_DEG)
+				stuck = true;
+			else
+			{
+				// still moving. reset timer and bearing
+				stuckBearingCheck = currentBearing;
+				stuckTimer = timeCurrent;
+			}
+		}
+	}
+
+	return stuck;
 }
 
 /*
@@ -414,7 +442,11 @@ void checkRotateComplete() {
 	int currentBearing = getAzimuth();
 
 	if ( currentBearing == 0 ) // ?? !compass.ready() ??
+	{
+		if (checkRotationStuck(currentBearing))
+			rotateStop(5);
 		return;
+	}
 
 	// Logical based on hemisphere to avoid compass discontinuity
 	bool west = (currentBearing > 179 && currentBearing <= 360);
@@ -480,22 +512,8 @@ void checkRotateComplete() {
 	}
 
 	// If still rotating, check if stuck
-	if (rotating) {
-		unsigned long timeCurrent = millis();
-		if (stuckTimer > timeCurrent) // roll over. Just rest and ignore this interval
-			stuckTimer = timeCurrent;
-		if (timeCurrent - stuckTimer > STUCK_TIME) {
-			// time to check for rotation
-			if (abs(currentBearing - stuckBearingCheck) < STUCK_DEG) {
-				rotateStop(5); // stuck
-				stuck = true;
-			} else {
-				// still moving. reset timer and bearing
-				stuckBearingCheck = currentBearing;
-				stuckTimer = timeCurrent;
-			}
-		}
-	}
+	if (checkRotationStuck(currentBearing))
+		rotateStop(5);
 
 #ifdef DEBUG
    if ( !rotating) { // debug
@@ -518,7 +536,7 @@ void checkRotateComplete() {
  */
 CMD setNewBearing(int newBearing)
 {
-	if (newBearing < 0 || newBearing > 360)
+	if (newBearing < 1 || newBearing > 360)
 		Serial.println("ERR:New bearing degrees out of range.");
 	else
 	{
@@ -534,16 +552,19 @@ CMD setNewBearing(int newBearing)
 		{
 			// bump for one second
 			bumpRotate(newBearing, targetBearing);
-			targetBearing = newBearing;
 			return NONE;
 		}
 
-		// Adjust the target slightly to compensate for overshoot
-		newBearing = newBearing + (newBearing < 180 ? -3 : +3);
-		if (newBearing <   1) newBearing = 360 + newBearing;  //  0 -> 360
-		if (newBearing > 360) newBearing = newBearing - 1;    // 360 -> 1
-
 		clockwise = transform(newBearing) > transform(currentBearing) ? true : false;
+		newBearing = newBearing + (clockwise ? -3 : +3);
+		if (newBearing <   1) newBearing = 360 + newBearing;  //  0 -> 360
+		if (newBearing > 360) newBearing = newBearing - 360;    // 360 -> 1
+
+	//	newBearing = newBearing + (newBearing < 180 ? -3 : +3);
+	//	if (newBearing <   1) newBearing = 360 + newBearing;  //  0 -> 360
+	//	if (newBearing > 360) newBearing = newBearing - 1;    // 360 -> 1
+
+	//	clockwise = transform(newBearing) > transform(currentBearing) ? true : false;
 		// Set off in opposite direction if wrapped.
 		if ( clockwise && wireSide == EAST && currentBearing > 179 && currentBearing < 315) clockwise = false;
 		if (!clockwise && wireSide == WEST && currentBearing < 180 && currentBearing > 45) clockwise = true;
