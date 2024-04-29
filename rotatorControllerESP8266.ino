@@ -16,15 +16,18 @@
  *                  Declination fix.
  *                  Allow for compass mount 90degrees issue.
  *                  Do "timed"rotations (bumps) if commanded heading is within +/- current target or heading
- *
+ * 1.2.0 2024-04-27 Add IDENTIFY command so a client can query the IP addr.
+ *                  Enable mDNS
  */
 
 /* ----------------- WiFi Configuration --------------------------------------------------
  *
  * Un-comment the #define PROVIDE_AP to configure the ESP8266 to offer a DNS hotspot to
  *             which computers can connect.
- * Set the ssid to the name of the router or hotspot to which the ESP8266 should connect
- *             to or offer
+ * Set the ssid to the name of the router to which the ESP8266 should connect
+ *             to. It is NOT used if configured as an AP DNS hotspot. The ssid when
+ *             configured as a hotspot is: ESP-XXYYZZ where XX, YY and ZZ are the last
+ *             four hex characters of the device's MAC address.
  * Set the password as needed.
 */
 
@@ -38,7 +41,6 @@ const char *password = "12345678";
 
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
-#include <vector>
 #include <WiFiUdp.h>
 #include <Wire.h>
 
@@ -59,7 +61,7 @@ const char *password = "12345678";
 #include <QMC5883L.h>
 #endif
 
-const char *version = "BuddiHex Rotator Firmware version 1.1.0";
+const char *version = "BuddiHex Rotator Firmware version 1.2.0";
 
 // Program constants
 const int ROTATE_CW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
@@ -73,6 +75,7 @@ const int MAX_UDP_PACKET_SZ = 255;
 // String representations of all possible commands (used in messages)
 String cmdWord[MAX_CMDS] = { "NONE", "PARK", "STOP", "SET_BEARING", "GET_PST_BEARING", "GET_BEARING", "CAL_DECL"};
 
+String ESP_Id;            // ESP8266 board name
 boolean rotating = false; // true means the antenna is being commanded to rotate
 boolean clockwise = true; // direction of rotation. Clockwise means degrees are increasing, 0 to 359. Valid only if rotation==true
 boolean stuck = false;    // true after a stuck rotator detected. Cleared on next bearing command.
@@ -174,12 +177,12 @@ void createWiFiAP() {
 	Serial.println();
 
 	// create access point
-	while (!WiFi.softAP(ssid, password, 6, false, 15)) {
+	while (!WiFi.softAP(generateEspName(), password, 6, false, 15)) {
 		delay(500);
 	}
 
 	// start dns server
-	if (!DNS.start(DNS_PORT, ssid, WiFi.softAPIP()))
+	if (!DNS.start(DNS_PORT, generateEspName(), WiFi.softAPIP()))
 		Serial.printf("\n failed to start dns service \n");
 
 	Udp.begin(4210);
@@ -213,6 +216,23 @@ void connectWiFi() {
 #endif
 
 /*
+ * Construct the ESP board name that is used to ID on the network. The format is:
+ * ESP-XXYYZZ where XX, YY and ZZ are the last four hex characters of the device's MAC
+ * address.
+ *
+ * Save the name in the
+ */
+String generateEspName ()
+{
+	uint8_t mac[WL_MAC_ADDR_LENGTH];
+	WiFi.macAddress(mac);
+	char macStr[18] = { 0 };
+
+	sprintf(macStr, "%02X%02X%02X", mac[3], mac[4], mac[5]);
+	return "ESP-" + String(macStr);
+}
+
+/*
  *
  */
 void setup() {
@@ -239,11 +259,16 @@ void setup() {
 DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
 #endif
 
+	ESP_Id = generateEspName();
+
 #ifdef PROVIDE_AP
 	createWiFiAP();
 #else
 	connectWiFi();
 #endif
+
+	Serial.println("Rotator Name is: " + ESP_Id);
+
 
 	// Declaring L293D Motor Controller control pins as Output
 	pinMode(ROTATE_CW, OUTPUT);
@@ -320,6 +345,16 @@ void loop() {
 		break;
 	case CAL_DECL:
 		calculateDeclination();
+		break;
+	case IDENTIFY:
+#ifdef PROVIDE_AP
+		cmdRsp += "IDENTIFY:" + WiFi.softAPIP().toString();
+#else
+		if ( Udp.remoteIP().toString().startsWith("192.168.4"))
+			cmdRsp += "IDENTIFY:" + WiFi.softAPIP().toString();
+		else
+			cmdRsp += "IDENTIFY:" + WiFi.localIP().toString();
+#endif
 		break;
 	default:
 		cmdRsp = "ERR:BUG:bad command in loop()!" + String(incomingPacket);
@@ -622,6 +657,15 @@ CMD processCommand(String inputString) {
 		return GET_BEARING;
 	else if (inputString.startsWith("CAL_DECL"))
 		return CAL_DECL;
+	else if (inputString.startsWith("IDENTIFY")) {
+		if ( (locInx = inputString.indexOf(":")) != -1) {
+			String requestedESP = inputString.substring(++locInx);
+DBG			Serial.println(requestedESP);
+			if (requestedESP == ESP_Id)
+				return IDENTIFY;
+		}
+		return NONE;
+	}
 	else {
 		// unknown command
 		Serial.print("?:");
@@ -684,4 +728,3 @@ void calculateDeclination()
 	Serial.println();
 #endif
 }
-

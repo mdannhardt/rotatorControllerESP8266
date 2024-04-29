@@ -17,6 +17,7 @@ enum CMD {
 	GET_PST_BEARING,// return the current bearing
 	GET_BEARING,    // return the current bearing along with rotation direction
 	CAL_DECL,       // calculate a new calibration
+	IDENTIFY,       // send IP address
 	MAX_CMDS
 };
 
