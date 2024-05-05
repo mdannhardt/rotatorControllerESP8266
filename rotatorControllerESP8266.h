@@ -32,4 +32,9 @@ int getData(String inputString);
 void checkRotateComplete();
 void calculateDeclination();
 
+String getWifiSSID();
+String getWifiPassword();
+bool isConfigured();
+
+
 #endif /* ROTATORCONTROLLERESP8266_H_ */
