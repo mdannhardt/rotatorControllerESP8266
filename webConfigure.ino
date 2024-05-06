@@ -23,8 +23,8 @@ String getWifiSSID() {
 		for (int i = 0; i < 32; ++i) {
 			ssid += char(EEPROM.read(i));
 		}
-		Serial.print("Retrieved SSID: ");
-		Serial.println(ssid);
+//		Serial.print("Retrieved SSID: ");
+//		Serial.println(ssid);
 	}
 	return ssid;
 }
@@ -50,8 +50,8 @@ String getWifiPassword() {
 		for (int i = 32; i < 96; ++i) {
 			password += char(EEPROM.read(i));
 		}
-		Serial.print("Retrieved Password: ");
-		Serial.println(password);
+//		Serial.print("Retrieved Password: ");
+//		Serial.println(password);
 	}
 	return password;
 }
@@ -71,7 +71,25 @@ void setWiFiPassword( String &pswd) {
     }
 }
 
+char hexToChar(char hex[]) {
+    char byte = (char)strtol(hex, NULL, 16); // Convert hex string to integer, then cast to char
+    return byte;
+}
 
+String webStringToAsciString(String in ) {
+	char hexBuf[3];hexBuf[2]=0;
+	String out = "";
+	for (int i = 0; i < in.length(); i++) {
+		if (in[i] != '%')
+			out += in[i];
+		else {
+			hexBuf[0]=in[++i];
+			hexBuf[1]=in[++i];
+			out += hexToChar(hexBuf);
+		}
+	}
+	return out;
+}
 void writeHtmlPage( WiFiClient &client ) {
 	String ssid = getWifiSSID();
 	String pswd = getWifiPassword();
@@ -80,31 +98,30 @@ void writeHtmlPage( WiFiClient &client ) {
 
 
 	client.println("<!DOCTYPE HTML><html><head>");
-	client.println("<title>ESP Input Form</title>");
+	client.println("<title>ESP8266 Configuration Form</title>");
 	client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
 //	client.println("<meta http-equiv=\"refresh\" content=\"10\">");
 	client.println("</head><body>");
 
-	client.print("Current SSID: ");
+	client.print("Current SSID: <b>");
 	client.printf("%s", ssid.c_str());
-	client.println("<br>");
+	client.println("</b><br>");
 
-	client.println( " Current Password: ");
+	client.println( " Current Password: <b>");
 	client.printf("%s", pswd.c_str());
-	client.println("<br>");
+	client.println("</b><br><br />");
 
 	client.println("<form action=\"/get\">");
-	client.println("Update: <input type=\"text\" name=\"creds\"  >");
+	client.println("Update: <input type=\"text\" size = \"50\" name=\"creds\"  >");
 
-	client.println("<br>Use the following to commands on the 'Update' line:");
+	client.println("<br /><br>Use the following to commands on the 'Update' line:");
 
 	client.println(
 			"<ul>  "
-			"<li>Set a new SSID: SSID=\"new ssid\"</li>  "
-			"<li>Set a new password: Password=\"new password\"</li>  "
-			"<li>Refresh the SSID and password: Refresh (Note: after entering a new SSID or password, you need to refresh to see the new info.)</li>  "
-			"<li>Save and Reboot: Reboot=true (Note: a reboot saves the new setting and reboots the controller so they take effect.)</li>  "
-			"<li>Reset: Reset=true (Note: Resetting clears the SSID and password. Reboot is required to save the change.)</li>  "
+			"<li>Set a new SSID: ssid=<i>new ssid</i></li>  "
+			"<li>Set a new password: password=<i>new password</i></li>  "
+			"<li>Save and Reboot: reboot (Note: a reboot saves the new setting and reboots the controller so they take effect.)</li>  "
+			"<li>Reset: reset (Note: Resetting clears the SSID and password. Reboot is required to save the change.)</li>  "
 			"</ul>");
 	client.println("</body></html>");
 }
@@ -113,15 +130,12 @@ String getVal(String &src, String key ) {
 //	Serial.print("Looking for "); Serial.print(key);
 	String result = "";
 	int start = src.indexOf(key);
-//	Serial.printf(" from index %d",start+key.length()); Serial.println("");
 
 	if ( start > -1 ) {
 		start += key.length();
 		char c = src[start];
-//		Serial.printf(" First char is: %c", c); Serial.println("");
 		while (c > 32 && c < 127) {
 			result += c;
-//			Serial.println(c);
 		    c = src[++start];
 		}
 	}
@@ -129,11 +143,11 @@ String getVal(String &src, String key ) {
 }
 
 void readHtmlRsp(WiFiClient &client) {
-	String rspData = client.readString();
-	String ssid = getVal(rspData, "SSID%3D");
-	String pswd = getVal(rspData, "Password%3D");
-	String reset = getVal(rspData, "Reset");
-	String reboot = getVal(rspData, "Reboot");
+	String rspData = webStringToAsciString(client.readString());
+	String ssid = getVal(rspData, "ssid=");
+	String pswd = getVal(rspData, "password=");
+	String reset = getVal(rspData, "reset ");
+	String reboot = getVal(rspData, "reboot ");
 
 	Serial.println("Full Resp: " + rspData);
 

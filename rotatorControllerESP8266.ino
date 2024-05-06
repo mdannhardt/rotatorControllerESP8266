@@ -228,6 +228,7 @@ bool connectWiFi() {
 		Serial.print(".");
 	}
 
+	WiFi.disconnect();
 	Serial.println("");
 	Serial.println("WiFi Connect timed out.");
 	return false;
@@ -302,17 +303,13 @@ void loop() {
 	{
 		client = server.available();
 		if ( client ) {
-			writeHtmlPage(client);
 			readHtmlRsp(client);
+			writeHtmlPage(client);
 		}
 		else
 		{
 			DNS.processNextRequest();
 		}
-	}
-	else {
-		if (WiFi.status() != WL_CONNECTED)
-			connectWiFi();
 	}
 
 	CMD command = NONE;
