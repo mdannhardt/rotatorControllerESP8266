@@ -120,7 +120,7 @@ void writeHtmlPage( WiFiClient &client ) {
 			"<ul>  "
 			"<li>Set a new SSID: ssid=<i>new ssid</i></li>  "
 			"<li>Set a new password: password=<i>new password</i></li>  "
-			"<li>Save and Reboot: reboot (Note: a reboot saves the new setting and reboots the controller so they take effect.)</li>  "
+			"<li>Save and Reboot: reboot (Note: Reboot saves the new setting and reboots the controller so they take effect.)</li>  "
 			"<li>Reset: reset (Note: Resetting clears the SSID and password. Reboot is required to save the change.)</li>  "
 			"</ul>");
 	client.println("</body></html>");

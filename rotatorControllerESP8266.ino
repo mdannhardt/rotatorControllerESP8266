@@ -257,7 +257,7 @@ String generateEspName ()
  */
 void setup() {
 	Serial.begin(115200);
-	delay(10);
+	delay(5000);
 	EEPROM.begin(256);
 
 	Wire.begin();
@@ -268,17 +268,27 @@ void setup() {
 	Serial.println();
 
 #ifndef COMPASS_OFFICAL
-	// One time calibration
-	Serial.print("Calibration check..");
-	int r = 0;
-	int16_t x,y,z,t;
-	while (r==0) {
-		r = compass.readRaw(&x,&y,&z,&t);
-		Serial.print(".");
-		delay(100);
+	// One time calibration if the QMC5883L exists
+	Wire.beginTransmission(0x0D); // 0x0D is the default I2C address of the QMC5883L
+	byte error = Wire.endTransmission();
+	if (error != 0)
+	{
+		Serial.println("QMC5883L not found!");
 	}
-
-DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
+	else
+	{
+		Serial.print("QMC5883L calibration check..");
+		int r = 1000;
+		int16_t x, y, z, t;
+		while (r-- > 0) {
+			r = compass.readRaw(&x, &y, &z, &t);
+			Serial.print(".");
+			delay(100);
+		}
+		Serial.printf("Calibration %s", r > 0 ? "Success." : "Failed!");
+		Serial.println();
+		DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
+	}
 #endif
 
 	ESP_Id = generateEspName();
