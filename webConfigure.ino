@@ -8,7 +8,7 @@ bool isConfigured(void) {
 void clearEeprom() {
     Serial.println("clearing eeprom");
     for (int i = 0; i < 96; ++i) {
-      EEPROM.write(i, 0);
+      EEPROM.write(i, 255);
     }
 }
 
@@ -93,8 +93,8 @@ String webStringToAsciString(String in ) {
 void writeHtmlPage( WiFiClient &client ) {
 	String ssid = getWifiSSID();
 	String pswd = getWifiPassword();
-	Serial.printf("Return HTML page with SSID = %s and password = %s", ssid.c_str(), pswd.c_str());
-	Serial.println();
+//	Serial.printf("Return HTML page with SSID = %s and password = %s", ssid.c_str(), pswd.c_str());
+//	Serial.println();
 
 
 	client.println("<!DOCTYPE HTML><html><head>");
@@ -112,16 +112,26 @@ void writeHtmlPage( WiFiClient &client ) {
 	client.println("</b><br><br />");
 
 	client.println("<form action=\"/get\">");
-	client.println("Update: <input type=\"text\" size = \"50\" name=\"creds\"  >");
+	client.println("Input: <input type=\"text\" size = \"50\" name=\"creds\"  >");
 
-	client.println("<br /><br>Use the following to commands on the 'Update' line:");
+	client.println("<br /><br>Use the Input box above to:");
 
 	client.println(
 			"<ul>  "
-			"<li>Set a new SSID: ssid=<i>new ssid</i></li>  "
-			"<li>Set a new password: password=<i>new password</i></li>  "
-			"<li>Save and Reboot: reboot (Note: Reboot saves the new setting and reboots the controller so they take effect.)</li>  "
-			"<li>Reset: reset (Note: Resetting clears the SSID and password. Reboot is required to save the change.)</li>  "
+			"<li>To update the router SSID and Password enter the following:</li>  "
+			"<ol type=\"1\">"
+			"<li>Set a new SSID with: <b>ssid=<i>new ssid</i></b></li>  "
+			"<li>Set a new password with: <b>password=<i>new password</i></b></li>  "
+			"<li>Save the changes with: <b>save</b> (Note: Saves the new setting and reboots the controller so they take effect.)</li>  "
+			"</ol>"
+			"</ul>"
+
+			"<ul>  "
+			"<li>To clear the router SSID and Password enter the following:</li>  "
+			"<ol type=\"1\">"
+			"<li>Reset with: <b>reset</b> (Note: Resetting clears the SSID and password. Save is required to save the changes and reboot.)</li>  "
+			"<li>Save the changes with: <b>save</b> (Note: Saves the new setting and reboots the controller so they take effect.)</li>  "
+			"</ol>"
 			"</ul>");
 	client.println("</body></html>");
 }
@@ -147,16 +157,14 @@ void readHtmlRsp(WiFiClient &client) {
 	String ssid = getVal(rspData, "ssid=");
 	String pswd = getVal(rspData, "password=");
 	String reset = getVal(rspData, "reset ");
-	String reboot = getVal(rspData, "reboot ");
+	String reboot = getVal(rspData, "save ");
 
-	Serial.println("Full Resp: " + rspData);
+//	Serial.println("Full Resp: " + rspData);
 
 	if ( ssid.length() > 0 ) {
-		Serial.println("SSID = " + ssid);
 		setWiFiSSID(ssid);
 	}
 	if ( pswd.length() > 0 ) {
-		Serial.println("Password = " + pswd);
 		setWiFiPassword(pswd);
 	}
 
