@@ -278,14 +278,16 @@ void setup() {
 	else
 	{
 		Serial.print("QMC5883L calibration check..");
-		int r = 1000;
+		int r = 100;
 		int16_t x, y, z, t;
-		while (r-- > 0) {
-			r = compass.readRaw(&x, &y, &z, &t);
+		while (r-- > 0 && compass.ready() == 0) {
 			Serial.print(".");
 			delay(100);
 		}
-		Serial.printf("Calibration %s", r > 0 ? "Success." : "Failed!");
+
+		Serial.printf("Calibration %s",
+				r > 0 && compass.readRaw(&x, &y, &z, &t) == 1 ?
+						"Success." : "Failed!");
 		Serial.println();
 		DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
 	}
