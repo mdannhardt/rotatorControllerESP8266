@@ -25,6 +25,13 @@ enum WIRE_SIDE {
 	UNKNWN, EAST, WEST, MAX_SIDES
 };
 
+// Fatal errors
+#define NO_ERROR         0
+#define COMPASS_MISSING -1
+#define COMPASS_NOT_RDY -2
+#define COMPASS_CAL_FLT -3
+
+
 // Function prototype forward declarations
 CMD processCommand(String inputString);
 int findData(String inputString);

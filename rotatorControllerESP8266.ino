@@ -68,9 +68,10 @@ boolean stuck = false;    // true after a stuck rotator detected. Cleared on nex
 WIRE_SIDE wireSide = UNKNWN;
 boolean wrapped = false;  // rotator has crossed over due south
 int targetBearing;        // in degrees.
-unsigned long stuckTimer;  // used to check for stuck rotator
+unsigned long stuckTimer; // used to check for stuck rotator
 unsigned long checkRotationTimer;
 int stuckBearingCheck;    // used to check for stuck rotator
+int errorCode = 0;        // set to a negative if a fatal error encountered
 
 #ifdef COMPASS_OFFICAL
 QMC5883LCompass compass;
@@ -237,7 +238,7 @@ bool connectWiFi() {
 
 /*
  * Construct the ESP board name that is used to ID on the network. The format is:
- * ESP-XXYYZZ where XX, YY and ZZ are the last four hex characters of the device's MAC
+ * ESP-XXYYZZ where XX, YY and ZZ are the last three hex characters of the device's MAC
  * address.
  *
  * Save the name in the
@@ -273,6 +274,7 @@ void setup() {
 	byte error = Wire.endTransmission();
 	if (error != 0)
 	{
+		errorCode = COMPASS_MISSING;
 		Serial.println("QMC5883L not found!");
 	}
 	else
@@ -285,9 +287,12 @@ void setup() {
 			delay(100);
 		}
 
-		Serial.printf("Calibration %s",
-				r > 0 && compass.readRaw(&x, &y, &z, &t) == 1 ?
-						"Success." : "Failed!");
+		if (r <= 0)
+			errorCode = COMPASS_NOT_RDY;
+		else
+			errorCode = compass.readRaw(&x, &y, &z, &t) == 1 ? NO_ERROR : COMPASS_CAL_FLT;
+
+		Serial.printf("Calibration %s", errorCode == NO_ERROR ? "Success." : "Failed!");
 		Serial.println();
 		DBG	Serial.printf("Complete. %d, %d, %d, %d\n", x,y,z,t);
 	}
@@ -372,14 +377,23 @@ void loop() {
 		cmdRsp += ".0\r";
 		break;
 	case GET_BEARING:
-		cmdRsp = "GET_BEARING:" + String(getAzimuth());
-		if (rotating == true)
-			cmdRsp += clockwise ? ":CW" : ":CCW";
-		if ( stuck == true )
-			cmdRsp += ":Stuck";
+		if (errorCode != NO_ERROR)
+		{
+			cmdRsp = "GET_BEARING:" + String(errorCode);
+			cmdRsp += ":Error!";
+		}
+		else
+		{
+			cmdRsp = "GET_BEARING:" + String(getAzimuth());
+			if (rotating == true)
+				cmdRsp += clockwise ? ":CW" : ":CCW";
+			if ( stuck == true )
+				cmdRsp += ":Stuck";
+		}
 		break;
 	case SET_BEARING:
-		rotate();
+		if (errorCode == NO_ERROR)
+			rotate();
 		break;
 	case CAL_DECL:
 		calculateDeclination();
