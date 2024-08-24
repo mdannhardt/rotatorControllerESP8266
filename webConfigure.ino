@@ -1,5 +1,14 @@
 #include "webConfigure.h"
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <DNSServer.h>
+#include <Wire.h>
 #include <EEPROM.h>
+
+ESP8266WebServer server(80);
+
+float setpoint = 25.0; // Default setpoint
+
 
 bool isConfigured(void) {
 	return (EEPROM.read(0) != 255 || EEPROM.read(32) != 255);
@@ -71,112 +80,135 @@ void setWiFiPassword( String &pswd) {
     }
 }
 
-char hexToChar(char hex[]) {
-    char byte = (char)strtol(hex, NULL, 16); // Convert hex string to integer, then cast to char
-    return byte;
+void serverLoop() {
+  server.handleClient();
 }
 
-String webStringToAsciString(String in ) {
-	char hexBuf[3];hexBuf[2]=0;
-	String out = "";
-	for (int i = 0; i < in.length(); i++) {
-		if (in[i] != '%')
-			out += in[i];
-		else {
-			hexBuf[0]=in[++i];
-			hexBuf[1]=in[++i];
-			out += hexToChar(hexBuf);
-		}
-	}
-	return out;
-}
-void writeHtmlPage( WiFiClient &client ) {
-	String ssid = getWifiSSID();
-	String pswd = getWifiPassword();
-//	Serial.printf("Return HTML page with SSID = %s and password = %s", ssid.c_str(), pswd.c_str());
-//	Serial.println();
-
-
-	client.println("<!DOCTYPE HTML><html><head>");
-	client.println("<title>ESP8266 Configuration Form</title>");
-	client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-//	client.println("<meta http-equiv=\"refresh\" content=\"10\">");
-	client.println("</head><body>");
-
-	client.print("Current SSID: <b>");
-	client.printf("%s", ssid.c_str());
-	client.println("</b><br>");
-
-	client.println( " Current Password: <b>");
-	client.printf("%s", pswd.c_str());
-	client.println("</b><br><br />");
-
-	client.println("<form action=\"/get\">");
-	client.println("Input: <input type=\"text\" size = \"50\" name=\"creds\"  >");
-
-	client.println("<br /><br>Use the Input box above to:");
-
-	client.println(
-			"<ul>  "
-			"<li>To update the router SSID and Password enter the following:</li>  "
-			"<ol type=\"1\">"
-			"<li>Set a new SSID with: <b>ssid=<i>new ssid</i></b></li>  "
-			"<li>Set a new password with: <b>password=<i>new password</i></b></li>  "
-			"<li>Save the changes with: <b>save</b> (Note: Saves the new setting and reboots the controller so they take effect.)</li>  "
-			"</ol>"
-			"</ul>"
-
-			"<ul>  "
-			"<li>To clear the router SSID and Password enter the following:</li>  "
-			"<ol type=\"1\">"
-			"<li>Reset with: <b>reset</b> (Note: Resetting clears the SSID and password. Save is required to save the changes and reboot.)</li>  "
-			"<li>Save the changes with: <b>save</b> (Note: Saves the new setting and reboots the controller so they take effect.)</li>  "
-			"</ol>"
-			"</ul>");
-	client.println("</body></html>");
+void handleRoot() {
+  Serial.println("handleRoot()");
+  String html = "<html><head>";
+  //html += "<meta http-equiv='refresh' content='1000'>";
+  html += "<style>";
+  html += "  body { font-family: Arial, sans-serif; }";
+  html += "  .temperature { font-size: 48px; font-weight: bold; color: #0066cc; }";
+  html += "</style>";
+  html += "<script>";
+  html += "function updateTemperature() {";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.onreadystatechange = function() {";
+  html += "    if (this.readyState == 4 && this.status == 200) {";
+  html += "      document.getElementById('temperature').innerHTML = this.responseText;";
+  html += "    }";
+  html += "  };";
+  html += "  xhttp.open('GET', '/temperature', true);";
+  html += "  xhttp.send();";
+  html += "}";
+  html += "function setSetpoint() {";
+  html += "  var setpoint = document.getElementById('setpointInput').value;";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.open('POST', '/setpoint', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('setpoint=' + setpoint);";
+  html += "}";
+  html += "function setCardnal(value) {";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.onreadystatechange = function() {";
+  html += "    if (this.readyState == 4 && this.status == 200) {";
+  html += "      location.reload();"; // Add this line to force a page reload
+  html += "    }";
+  html += "  };";
+  html += "  xhttp.open('POST', '/setpoint', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('setpoint=' + value);";
+//  html += "  xhttp.open('POST', '/fanspeed', true);";
+//  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+//  html += "  xhttp.send('fanspeed=' + value);";
+  html += "}";
+  html += "setInterval(updateTemperature, 1000);";
+  html += "</script>";
+  html += "</head><body>";
+  html += "<h2>Set Temperature</h2>";
+  html += "<input type='number' id='setpointInput' step='1' value='" + String(setpoint) + "' oninput='setSetpoint(this.value)'>";
+  //html += "<h2>Set Fan Speed</h2>";
+  html += "<button onclick='setCardnal(0)'>North</button>";
+  html += "<button onclick='setCardnal(90)'>East</button>";
+  html += "<button onclick='setCardnal(180)'>South</button>";
+  html += "<button onclick='setCardnal(270)'>West</button>";
+  html += "<h2>Current Temperature</h2>";
+  html += "<p class='temperature' id='temperature'></p>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
 }
 
-String getVal(String &src, String key ) {
-//	Serial.print("Looking for "); Serial.print(key);
-	String result = "";
-	int start = src.indexOf(key);
-
-	if ( start > -1 ) {
-		start += key.length();
-		char c = src[start];
-		while (c > 32 && c < 127) {
-			result += c;
-		    c = src[++start];
-		}
-	}
-	return result;
+void handleTemperature() {
+  float temperature = setpoint;
+  if (isnan(temperature)) {
+    server.send(200, "text/plain", "Failed to read temperature");
+  } else {
+    server.send(200, "text/plain", String(temperature) + " C");
+  }
 }
 
-void readHtmlRsp(WiFiClient &client) {
-	String rspData = webStringToAsciString(client.readString());
-	String ssid = getVal(rspData, "ssid=");
-	String pswd = getVal(rspData, "password=");
-	String reset = getVal(rspData, "reset ");
-	String reboot = getVal(rspData, "save ");
+void handleSetpoint() {
+  if (server.hasArg("setpoint")) {
+    setpoint = server.arg("setpoint").toFloat();
+    server.send(200, "text/plain", "Setpoint updated to " + String(setpoint));
+  } else {
+    server.send(400, "text/plain", "Missing setpoint parameter");
+  }
+}
 
-//	Serial.println("Full Resp: " + rspData);
 
-	if ( ssid.length() > 0 ) {
-		setWiFiSSID(ssid);
-	}
-	if ( pswd.length() > 0 ) {
-		setWiFiPassword(pswd);
-	}
+// Functions to support the ESP8266 acting as DNS and connection AP
+static DNSServer DNS;
 
-	if ( reboot.length() > 0) {
-		saveEeprom();
-		ESP.reset();
-	}
+/*
+ * Construct the ESP board name that is used to ID on the network. The format is:
+ * ESP-XXYYZZ where XX, YY and ZZ are the last three hex characters of the device's MAC
+ * address.
+ *
+ * Save the name in the
+ */
+String generateEspName ()
+{
+	uint8_t mac[WL_MAC_ADDR_LENGTH];
+	WiFi.macAddress(mac);
+	char macStr[18] = { 0 };
 
-	if ( reset.length() > 0)
-		clearEeprom();
+	sprintf(macStr, "%02X%02X%02X", mac[3], mac[4], mac[5]);
+	return "ESP-" + String(macStr);
+}
 
-	client.flush();
+void createWiFiAP() {
+	Serial.println();
+
+	IPAddress local_IP(192,168,4,1);
+	IPAddress gateway(192,168,4,9);
+	IPAddress subnet(255,255,255,0);
+
+	// create access point
+
+	Serial.print("Setting soft-AP configuration ... ");
+	Serial.println(
+			WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
+
+	Serial.print("Setting soft-AP ... ");
+	Serial.println(WiFi.softAP(generateEspName()) ? "Ready" : "Failed!");
+
+	Serial.print("Soft-AP IP address = ");
+	Serial.println(WiFi.softAPIP());
+
+	// start dns server
+	if (!DNS.start(DNS_PORT, generateEspName(), WiFi.softAPIP()))
+		Serial.printf("\n failed to start dns service \n");
+
+	// Start the server
+	server.on("/", handleRoot);
+	server.on("/temperature", handleTemperature);
+	server.on("/setpoint", handleSetpoint);
+
+	server.begin();
+	Serial.println("Server started");
 }
 
 

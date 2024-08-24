@@ -24,8 +24,6 @@
 
 #include "rotatorControllerESP8266.h"
 #include "webConfigure.h"
-#include <ESP8266WiFi.h>
-#include <DNSServer.h>
 #include <WiFiUdp.h>
 #include <Wire.h>
 
@@ -61,7 +59,6 @@ const int MAX_UDP_PACKET_SZ = 255;
 String cmdWord[MAX_CMDS] = { "NONE", "PARK", "STOP", "SET_BEARING", "GET_PST_BEARING", "GET_BEARING", "CAL_DECL"};
 
 String ESP_Id;            // ESP8266 board name
-boolean apMode = false;   // true is a softAP has been establisted
 boolean rotating = false; // true means the antenna is being commanded to rotate
 boolean clockwise = true; // direction of rotation. Clockwise means degrees are increasing, 0 to 359. Valid only if rotation==true
 boolean stuck = false;    // true after a stuck rotator detected. Cleared on next bearing command.
@@ -79,8 +76,6 @@ QMC5883LCompass compass;
 QMC5883L compass;
 #endif
 
-
-WiFiServer server(80);
 WiFiUDP Udp;
 unsigned int localUdpPort = 4210;        // local port to listen on
 char incomingPacket[MAX_UDP_PACKET_SZ];  // buffer for incoming packets
@@ -159,39 +154,6 @@ int transform( int in )
 	return out;
 }
 
-// Functions to support the ESP8266 acting as DNS and connection AP
-static DNSServer DNS;
-
-void createWiFiAP() {
-	Serial.println();
-	IPAddress local_IP(192,168,4,1);
-	IPAddress gateway(192,168,4,9);
-	IPAddress subnet(255,255,255,0);
-
-	// create access point
-
-	Serial.print("Setting soft-AP configuration ... ");
-	Serial.println(
-			WiFi.softAPConfig(local_IP, gateway, subnet) ? "Ready" : "Failed!");
-
-	Serial.print("Setting soft-AP ... ");
-	Serial.println(WiFi.softAP(generateEspName()) ? "Ready" : "Failed!");
-
-	Serial.print("Soft-AP IP address = ");
-	Serial.println(WiFi.softAPIP());
-
-	// start dns server
-	if (!DNS.start(DNS_PORT, generateEspName(), WiFi.softAPIP()))
-		Serial.printf("\n failed to start dns service \n");
-
-	Udp.begin(4210);
-
-	apMode = true;
-
-	// Start the server
-	server.begin();
-	Serial.println("Server started");
-}
 
 /*
  * Connect to a router/hotspot AP
@@ -200,7 +162,7 @@ bool connectWiFi() {
 	int c = 0;
 	if ( !isConfigured() ) {
 		Serial.println("No configuration stored");
-		return false;
+//		return false;
 	}
 
 	Serial.println();
@@ -210,7 +172,13 @@ bool connectWiFi() {
 	Serial.print(" using password: ");
 	Serial.println(getWifiPassword().c_str());
 
-	WiFi.begin(getWifiSSID().c_str(), getWifiPassword().c_str());
+
+	const char* ssid = "FiOS-Z6V6X";
+	const char* password = "rug057tower5294tub";
+
+	WiFi.begin(ssid, password);
+
+//	WiFi.begin(getWifiSSID().c_str(), getWifiPassword().c_str());
 
 	while (c++ < 20) {
 		if (WiFi.status() == WL_CONNECTED) {
@@ -235,23 +203,6 @@ bool connectWiFi() {
 	return false;
 }
 
-
-/*
- * Construct the ESP board name that is used to ID on the network. The format is:
- * ESP-XXYYZZ where XX, YY and ZZ are the last three hex characters of the device's MAC
- * address.
- *
- * Save the name in the
- */
-String generateEspName ()
-{
-	uint8_t mac[WL_MAC_ADDR_LENGTH];
-	WiFi.macAddress(mac);
-	char macStr[18] = { 0 };
-
-	sprintf(macStr, "%02X%02X%02X", mac[3], mac[4], mac[5]);
-	return "ESP-" + String(macStr);
-}
 
 /*
  *
@@ -302,6 +253,7 @@ void setup() {
 
 	connectWiFi();
 	createWiFiAP();
+	Udp.begin(4210);
 
 	Serial.println("Rotator Name is: " + ESP_Id);
 
@@ -315,20 +267,7 @@ void setup() {
  *
  */
 void loop() {
-	WiFiClient client;
-	if (apMode == true)
-	{
-		client = server.available();
-		if ( client ) {
-			readHtmlRsp(client);
-			writeHtmlPage(client);
-		}
-		else
-		{
-			DNS.processNextRequest();
-		}
-	}
-
+	serverLoop();
 	CMD command = NONE;
 
 	if ( digitalRead(ROTATE_CW) && digitalRead(ROTATE_CCW))
