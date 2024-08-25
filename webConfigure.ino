@@ -29,7 +29,7 @@ String getWifiSSID() {
 	String ssid = "no_cfg";
 	if (EEPROM.read(0) != 255) {
 		ssid = "";
-		for (int i = 0; i < 32; ++i) {
+		for (int i = 0; i < 32 && EEPROM.read(i) != 0; ++i) {
 			ssid += char(EEPROM.read(i));
 		}
 //		Serial.print("Retrieved SSID: ");
@@ -40,8 +40,8 @@ String getWifiSSID() {
 
 void setWiFiSSID( String &ssid) {
     int i;
-	Serial.print("Setting SSID: ");
-	Serial.println(ssid);
+//	Serial.print("Setting SSID: ");
+//	Serial.println(ssid);
 
     for (i=0; i < 32; i++)
       EEPROM.write(i, 0);
@@ -56,7 +56,7 @@ String getWifiPassword() {
 	String password = "no_cfg";
 	if (EEPROM.read(32) != 255) {
 		password = "";
-		for (int i = 32; i < 96; ++i) {
+		for (int i = 32; i < 96 && EEPROM.read(i) != 0; ++i) {
 			password += char(EEPROM.read(i));
 		}
 //		Serial.print("Retrieved Password: ");
@@ -68,8 +68,8 @@ String getWifiPassword() {
 
 void setWiFiPassword( String &pswd) {
     int i;
-	Serial.print("Setting Password: ");
-	Serial.println(pswd);
+//	Serial.print("Setting Password: ");
+//	Serial.println(pswd);
     for (i=32; i < 96; i++)
       EEPROM.write(i, 0);
     for (int j = 0, i = 32; j < pswd.length(); j++, i++) {
@@ -87,12 +87,38 @@ void serverLoop() {
 void handleRoot() {
   Serial.println("handleRoot()");
   String html = "<html><head>";
-  //html += "<meta http-equiv='refresh' content='1000'>";
+
   html += "<style>";
   html += "  body { font-family: Arial, sans-serif; }";
+
   html += "  .temperature { font-size: 48px; font-weight: bold; color: #0066cc; }";
+
+  html += "  .button-grid {";
+  html += "    display: grid;";
+  html += "    grid-template-columns: repeat(3, 1fr);";
+  html += "    gap: 10px;";
+  html += "    max-width: 300px;";
+  html += "  }";
+  html += "  .bearing-button {";
+  html += "    background-color: #4CAF50;";
+  html += "    border: none;";
+  html += "    color: white;";
+  html += "    padding: 15px 0;";
+  html += "    text-align: center;";
+  html += "    text-decoration: none;";
+  html += "    display: inline-block;";
+  html += "    font-size: 16px;";
+  html += "    margin: 4px 2px;";
+  html += "    cursor: pointer;";
+  html += "    border-radius: 5px;";
+  html += "  }";
+  html += "  .bearing-button.red {";
+  html += "    background-color: #ff0000;";
+  html += "  }";
   html += "</style>";
+
   html += "<script>";
+
   html += "function updateTemperature() {";
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.onreadystatechange = function() {";
@@ -103,6 +129,30 @@ void handleRoot() {
   html += "  xhttp.open('GET', '/temperature', true);";
   html += "  xhttp.send();";
   html += "}";
+
+  html += "function setSSID() {";
+  html += "  var ssid = document.getElementById('ssidInput').value;";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.open('POST', '/ssid', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('ssid=' + ssid);";
+  html += "}";
+
+  html += "function setPassword() {";
+  html += "  var password = document.getElementById('passwordInput').value;";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.open('POST', '/password', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('password=' + password);";
+  html += "}";
+
+  html += "function reset() {";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.open('POST', '/reset', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('reset');";
+  html += "}";
+
   html += "function setSetpoint() {";
   html += "  var setpoint = document.getElementById('setpointInput').value;";
   html += "  var xhttp = new XMLHttpRequest();";
@@ -110,6 +160,7 @@ void handleRoot() {
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
   html += "  xhttp.send('setpoint=' + setpoint);";
   html += "}";
+
   html += "function setCardnal(value) {";
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.onreadystatechange = function() {";
@@ -120,32 +171,83 @@ void handleRoot() {
   html += "  xhttp.open('POST', '/setpoint', true);";
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
   html += "  xhttp.send('setpoint=' + value);";
-//  html += "  xhttp.open('POST', '/fanspeed', true);";
-//  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
-//  html += "  xhttp.send('fanspeed=' + value);";
   html += "}";
-  html += "setInterval(updateTemperature, 1000);";
+
+  html += "setInterval(updateTemperature, 100000);";
+
   html += "</script>";
+
   html += "</head><body>";
-  html += "<h2>Set Temperature</h2>";
-  html += "<input type='number' id='setpointInput' step='1' value='" + String(setpoint) + "' oninput='setSetpoint(this.value)'>";
-  //html += "<h2>Set Fan Speed</h2>";
-  html += "<button onclick='setCardnal(0)'>North</button>";
-  html += "<button onclick='setCardnal(90)'>East</button>";
-  html += "<button onclick='setCardnal(180)'>South</button>";
-  html += "<button onclick='setCardnal(270)'>West</button>";
-  html += "<h2>Current Temperature</h2>";
+
+  html += "<b>Set Bearing ";
+  html += "<input type='number' id='setpointInput' step='5' value='" + String(setpoint) + "'>";
+  html += "<button onclick='setSetpoint()'>Go</button></b>";
+//  html += "<button onclick='setCardnal(this.value)'>Go</button></b>";
+
+//  html += "<input type='number' id='setpointInput' step='1' value='" + String(setpoint) + "' oninput='setSetpoint(this.value)'>";
+
+
+  html += "<br /><div class='button-grid'>";
+  html += "<button class='bearing-button' onclick='setCardnal(0)'>NW</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(0)'>North</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(45)'>NE</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(270)'>West</button>";
+  html += "<button class='bearing-button red' onclick='setCardnal(28)'>STOP</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(90)'>East</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(225)'>SW</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(180)'>South</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(135)'>SE</button>";
+  html += "</div>";
+
+
+  html += "<h2>Current Bearing</h2>";
   html += "<p class='temperature' id='temperature'></p>";
+
+  html += "<br /><br /><br>Set WiFi Router SSID and Password: ";
+  html += "<input type='text' id='ssidInput' value='" + getWifiSSID() + "' oninput='setSSID(this.value)'>";
+  html += "<input type='text' id='passwordInput' value='" + getWifiPassword() + "' oninput='setPassword(this.value)'>";
+  html += "<button onclick='reset()'>Save and Reboot</button></br>";
+
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
 
-void handleTemperature() {
-  float temperature = setpoint;
-  if (isnan(temperature)) {
-    server.send(200, "text/plain", "Failed to read temperature");
+extern String buildCurrentBearingString();
+void handleCurrentBearing() {
+	//  Serial.println("handleCurrentBearing()");
+    server.send(200, "text/plain", buildCurrentBearingString());
+}
+
+void handleSSID() {
+//  Serial.println("handleSSID()");
+  if (server.hasArg("ssid")) {
+    String ssid = server.arg("ssid");
+    setWiFiSSID(ssid);
+    server.send(200, "text/plain", "SSID updated to " + String(ssid));
   } else {
-    server.send(200, "text/plain", String(temperature) + " C");
+    server.send(400, "text/plain", "Missing SSID parameter");
+  }
+}
+
+void handlePassword() {
+  Serial.println("handlePassword()");
+  if (server.hasArg("password")) {
+    String password = server.arg("password");
+    setWiFiPassword(password);
+    server.send(200, "text/plain", "Password updated to " + String(password));
+  } else {
+    server.send(400, "text/plain", "Missing SSID parameter");
+  }
+}
+
+void handleReset() {
+  Serial.println("handleReset()");
+  if (server.hasArg("reset")) {
+    server.send(200, "text/plain", "Resetting");
+    saveEeprom();
+    ESP.reset();
+  } else {
+    server.send(400, "text/plain", "Missing SSID parameter");
   }
 }
 
@@ -204,7 +306,10 @@ void createWiFiAP() {
 
 	// Start the server
 	server.on("/", handleRoot);
-	server.on("/temperature", handleTemperature);
+	server.on("/ssid", handleSSID);
+	server.on("/reset", handleReset);
+	server.on("/password", handlePassword);
+	server.on("/temperature", handleCurrentBearing);
 	server.on("/setpoint", handleSetpoint);
 
 	server.begin();

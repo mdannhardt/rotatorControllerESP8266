@@ -10,7 +10,7 @@ String generateEspName (void);
 void createWiFiAP(void);
 
 String getWifiSSID(void);
-void setWiFiSSID( String &ssid);
+//void setWiFiSSID( String &ssid);
 String getWifiPassword(void);
 void setWiFiPassword( String &pswd);
 

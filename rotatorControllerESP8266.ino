@@ -162,7 +162,7 @@ bool connectWiFi() {
 	int c = 0;
 	if ( !isConfigured() ) {
 		Serial.println("No configuration stored");
-//		return false;
+		return false;
 	}
 
 	Serial.println();
@@ -172,13 +172,7 @@ bool connectWiFi() {
 	Serial.print(" using password: ");
 	Serial.println(getWifiPassword().c_str());
 
-
-	const char* ssid = "FiOS-Z6V6X";
-	const char* password = "rug057tower5294tub";
-
-	WiFi.begin(ssid, password);
-
-//	WiFi.begin(getWifiSSID().c_str(), getWifiPassword().c_str());
+	WiFi.begin(getWifiSSID().c_str(), getWifiPassword().c_str());
 
 	while (c++ < 20) {
 		if (WiFi.status() == WL_CONNECTED) {
@@ -262,6 +256,23 @@ void setup() {
 	pinMode(ROTATE_CCW, OUTPUT);
 }
 
+String buildCurrentBearingString() {
+	String bearing;
+	if (errorCode != NO_ERROR)
+	{
+		bearing = String(errorCode);
+		bearing += ":Error!";
+	}
+	else
+	{
+		bearing = String(getAzimuth());
+		if (rotating == true)
+			bearing += clockwise ? ":CW" : ":CCW";
+		if ( stuck == true )
+			bearing += ":Stuck";
+	}
+	return bearing;
+}
 
 /*
  *
@@ -316,19 +327,7 @@ void loop() {
 		cmdRsp += ".0\r";
 		break;
 	case GET_BEARING:
-		if (errorCode != NO_ERROR)
-		{
-			cmdRsp = "GET_BEARING:" + String(errorCode);
-			cmdRsp += ":Error!";
-		}
-		else
-		{
-			cmdRsp = "GET_BEARING:" + String(getAzimuth());
-			if (rotating == true)
-				cmdRsp += clockwise ? ":CW" : ":CCW";
-			if ( stuck == true )
-				cmdRsp += ":Stuck";
-		}
+		cmdRsp = "GET_BEARING:" + buildCurrentBearingString();
 		break;
 	case SET_BEARING:
 		if (errorCode == NO_ERROR)
