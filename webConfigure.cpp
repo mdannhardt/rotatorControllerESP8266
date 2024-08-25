@@ -1,10 +1,8 @@
-#include "webConfigure.h"
 #include "rotatorControllerESP8266.h"
+#include "webConfigure.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <DNSServer.h>
-#include <Wire.h>
-#include <EEPROM.h>
 
 ESP8266WebServer server(80);
 
@@ -91,7 +89,8 @@ void handleRoot() {
   html += "<style>";
   html += "  body { font-family: Arial, sans-serif; }";
 
-  html += "  .bearing { font-size: 48px; font-weight: bold; text-align: center; color: #0066cc; }";
+//  html += "  .bearing { font-size: 48px; font-weight: bold; text-align: center; color: #0066cc; }";
+  html += "  .bearing { font-size: 48px; font-weight: bold; color: #0066cc; }";
 
   html += "  .button-grid {";
   html += "    display: grid;";
@@ -117,6 +116,16 @@ void handleRoot() {
   html += "  .bearing-button.red {";
   html += "    background-color: #ff0000;";
   html += "  }";
+
+  html += "  .ip-address {";
+  html += "    font-size: 14px;";
+  html += "    color: #333;";
+  html += "    margin: 20px 0;";
+  html += "    padding: 10px;";
+  html += "    background-color: #f0f0f0;";
+  html += "    border-radius: 5px;";
+  html += "  }";
+
   html += "</style>";
 
   html += "<script>";
@@ -163,6 +172,13 @@ void handleRoot() {
   html += "  xhttp.send('newBearing=' + newBearing);";
   html += "}";
 
+  html += "function stop() {";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.open('POST', '/stop', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('stop');";
+  html += "}";
+
   html += "function setCardnal(value) {";
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.onreadystatechange = function() {";
@@ -190,7 +206,7 @@ void handleRoot() {
   html += "<button class='bearing-button' onclick='setCardnal(1)'>North</button>";
   html += "<button class='bearing-button' onclick='setCardnal(45)'>NE</button>";
   html += "<button class='bearing-button' onclick='setCardnal(270)'>West</button>";
-  html += "<button class='bearing-button red' onclick='setCardnal(28)'>STOP</button>";
+  html += "<button class='bearing-button red' onclick='stop()'>STOP</button>";
   html += "<button class='bearing-button' onclick='setCardnal(90)'>East</button>";
   html += "<button class='bearing-button' onclick='setCardnal(225)'>SW</button>";
   html += "<button class='bearing-button' onclick='setCardnal(180)'>South</button>";
@@ -204,6 +220,10 @@ void handleRoot() {
   html += "<input type='text' id='ssidInput' value='" + getWifiSSID() + "' oninput='setSSID(this.value)'>";
   html += "<input type='text' id='passwordInput' value='" + getWifiPassword() + "' oninput='setPassword(this.value)'>";
   html += "<button onclick='reset()'>Save and Reboot</button></br>";
+
+  String ip =  WiFi.status() != WL_CONNECTED ? String("Not Connected") : WiFi.localIP().toString();
+
+  html += "<div class='ip-address' id='statusMessage'>" + String("Assigned IP Address from router: ") + ip + "</div></br>";
 
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -238,13 +258,24 @@ void handlePassword() {
 }
 
 void handleReset() {
-  Serial.println("handleReset()");
+//  Serial.println("handleReset()");
   if (server.hasArg("reset")) {
     server.send(200, "text/plain", "Resetting");
     saveEeprom();
     ESP.reset();
   } else {
-    server.send(400, "text/plain", "Missing SSID parameter");
+    server.send(400, "text/plain", "Missing parameter");
+  }
+}
+
+extern void rotateStop(int why);
+void handleStop() {
+  Serial.println("handleStop()");
+  if (server.hasArg("stop")) {
+    server.send(200, "text/plain", "Stopping");
+    rotateStop(0);
+  } else {
+    server.send(400, "text/plain", "Missing parameter");
   }
 }
 
@@ -312,6 +343,7 @@ void createWiFiAP() {
 	server.on("/", handleRoot);
 	server.on("/ssid", handleSSID);
 	server.on("/reset", handleReset);
+	server.on("/stop", handleStop);
 	server.on("/password", handlePassword);
 	server.on("/bearing", handleCurrentBearing);
 	server.on("/newBearing", handleSetBearing);

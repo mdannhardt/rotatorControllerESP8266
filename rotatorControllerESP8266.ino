@@ -25,7 +25,6 @@
 #include "rotatorControllerESP8266.h"
 #include "webConfigure.h"
 #include <WiFiUdp.h>
-#include <Wire.h>
 
 //#define DEBUG
 #ifdef DEBUG
@@ -373,8 +372,7 @@ void rotateStop(int why) {
 
 	Serial.print("Rotate stop." );
 	switch(why) {
-	case 0:
-		Serial.println(" CMD"); break;
+	case 0:	Serial.println(" CMD"); break;
 	case 1: Serial.println(" CW complete"); break;
 	case 2: Serial.println(" CCW complete"); break;
 	case 3: Serial.println(" CW bump complete"); break;

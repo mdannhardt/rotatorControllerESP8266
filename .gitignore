@@ -1,6 +1,8 @@
 *
 !*.ino
 !*.c
+!*.cpp
 !*.h
 !.gitignore
 !*.pdf
+sloeber.ino.cpp

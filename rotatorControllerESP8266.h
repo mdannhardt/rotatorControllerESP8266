@@ -8,6 +8,10 @@
 #ifndef ROTATORCONTROLLERESP8266_H_
 #define ROTATORCONTROLLERESP8266_H_
 
+#include <ESP8266WiFi.h>
+#include <EEPROM.h>
+#include <Wire.h>
+
 enum CMD {
 	NONE, PARK,     // not implemented
 	STOP,           // stop rotation
