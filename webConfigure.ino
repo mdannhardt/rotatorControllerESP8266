@@ -1,4 +1,5 @@
 #include "webConfigure.h"
+#include "rotatorControllerESP8266.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <DNSServer.h>
@@ -7,8 +8,7 @@
 
 ESP8266WebServer server(80);
 
-float setpoint = 25.0; // Default setpoint
-
+int NewTargetBearing = 0;
 
 bool isConfigured(void) {
 	return (EEPROM.read(0) != 255 || EEPROM.read(32) != 255);
@@ -91,7 +91,7 @@ void handleRoot() {
   html += "<style>";
   html += "  body { font-family: Arial, sans-serif; }";
 
-  html += "  .temperature { font-size: 48px; font-weight: bold; color: #0066cc; }";
+  html += "  .bearing { font-size: 48px; font-weight: bold; text-align: center; color: #0066cc; }";
 
   html += "  .button-grid {";
   html += "    display: grid;";
@@ -99,6 +99,7 @@ void handleRoot() {
   html += "    gap: 10px;";
   html += "    max-width: 300px;";
   html += "  }";
+
   html += "  .bearing-button {";
   html += "    background-color: #4CAF50;";
   html += "    border: none;";
@@ -112,6 +113,7 @@ void handleRoot() {
   html += "    cursor: pointer;";
   html += "    border-radius: 5px;";
   html += "  }";
+
   html += "  .bearing-button.red {";
   html += "    background-color: #ff0000;";
   html += "  }";
@@ -119,14 +121,14 @@ void handleRoot() {
 
   html += "<script>";
 
-  html += "function updateTemperature() {";
+  html += "function updateBearing() {";
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.onreadystatechange = function() {";
   html += "    if (this.readyState == 4 && this.status == 200) {";
-  html += "      document.getElementById('temperature').innerHTML = this.responseText;";
+  html += "      document.getElementById('bearing').innerHTML = this.responseText;";
   html += "    }";
   html += "  };";
-  html += "  xhttp.open('GET', '/temperature', true);";
+  html += "  xhttp.open('GET', '/bearing', true);";
   html += "  xhttp.send();";
   html += "}";
 
@@ -153,12 +155,12 @@ void handleRoot() {
   html += "  xhttp.send('reset');";
   html += "}";
 
-  html += "function setSetpoint() {";
-  html += "  var setpoint = document.getElementById('setpointInput').value;";
+  html += "function setNewBearing() {";
+  html += "  var newBearing = document.getElementById('newBearingInput').value;";
   html += "  var xhttp = new XMLHttpRequest();";
-  html += "  xhttp.open('POST', '/setpoint', true);";
+  html += "  xhttp.open('POST', '/newBearing', true);";
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
-  html += "  xhttp.send('setpoint=' + setpoint);";
+  html += "  xhttp.send('newBearing=' + newBearing);";
   html += "}";
 
   html += "function setCardnal(value) {";
@@ -168,28 +170,24 @@ void handleRoot() {
   html += "      location.reload();"; // Add this line to force a page reload
   html += "    }";
   html += "  };";
-  html += "  xhttp.open('POST', '/setpoint', true);";
+  html += "  xhttp.open('POST', '/newBearing', true);";
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
-  html += "  xhttp.send('setpoint=' + value);";
+  html += "  xhttp.send('newBearing=' + value);";
   html += "}";
 
-  html += "setInterval(updateTemperature, 100000);";
+  html += "setInterval(updateBearing, 100000);";
 
   html += "</script>";
 
   html += "</head><body>";
 
   html += "<b>Set Bearing ";
-  html += "<input type='number' id='setpointInput' step='5' value='" + String(setpoint) + "'>";
-  html += "<button onclick='setSetpoint()'>Go</button></b>";
-//  html += "<button onclick='setCardnal(this.value)'>Go</button></b>";
-
-//  html += "<input type='number' id='setpointInput' step='1' value='" + String(setpoint) + "' oninput='setSetpoint(this.value)'>";
-
+  html += "<input type='number' id='newBearingInput' step='5' value='" + String(NewTargetBearing) + "'>";
+  html += "<button onclick='setNewBearing()'>Go</button></b>";
 
   html += "<br /><div class='button-grid'>";
-  html += "<button class='bearing-button' onclick='setCardnal(0)'>NW</button>";
-  html += "<button class='bearing-button' onclick='setCardnal(0)'>North</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(315)'>NW</button>";
+  html += "<button class='bearing-button' onclick='setCardnal(1)'>North</button>";
   html += "<button class='bearing-button' onclick='setCardnal(45)'>NE</button>";
   html += "<button class='bearing-button' onclick='setCardnal(270)'>West</button>";
   html += "<button class='bearing-button red' onclick='setCardnal(28)'>STOP</button>";
@@ -201,7 +199,7 @@ void handleRoot() {
 
 
   html += "<h2>Current Bearing</h2>";
-  html += "<p class='temperature' id='temperature'></p>";
+  html += "<p class='bearing' id='bearing'></p>";
 
   html += "<br /><br /><br>Set WiFi Router SSID and Password: ";
   html += "<input type='text' id='ssidInput' value='" + getWifiSSID() + "' oninput='setSSID(this.value)'>";
@@ -251,12 +249,19 @@ void handleReset() {
   }
 }
 
-void handleSetpoint() {
-  if (server.hasArg("setpoint")) {
-    setpoint = server.arg("setpoint").toFloat();
-    server.send(200, "text/plain", "Setpoint updated to " + String(setpoint));
+extern CMD setNewBearing(int newBearing);
+extern void rotate();
+void handleSetBearing() {
+  Serial.println("handleSetBearing()");
+  if (server.hasArg("newBearing")) {
+    int bearing = server.arg("newBearing").toInt();
+    if ( setNewBearing(bearing) == SET_BEARING) {
+    	rotate();
+    	NewTargetBearing = bearing;
+    }
+    server.send(200, "text/plain", "New bearing updated to " + String(bearing));
   } else {
-    server.send(400, "text/plain", "Missing setpoint parameter");
+    server.send(400, "text/plain", "Missing newBearing parameter");
   }
 }
 
@@ -309,8 +314,8 @@ void createWiFiAP() {
 	server.on("/ssid", handleSSID);
 	server.on("/reset", handleReset);
 	server.on("/password", handlePassword);
-	server.on("/temperature", handleCurrentBearing);
-	server.on("/setpoint", handleSetpoint);
+	server.on("/bearing", handleCurrentBearing);
+	server.on("/newBearing", handleSetBearing);
 
 	server.begin();
 	Serial.println("Server started");
