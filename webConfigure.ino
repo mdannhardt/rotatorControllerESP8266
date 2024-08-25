@@ -175,7 +175,7 @@ void handleRoot() {
   html += "  xhttp.send('newBearing=' + value);";
   html += "}";
 
-  html += "setInterval(updateBearing, 100000);";
+  html += "setInterval(updateBearing, 1000);";
 
   html += "</script>";
 
@@ -196,7 +196,6 @@ void handleRoot() {
   html += "<button class='bearing-button' onclick='setCardnal(180)'>South</button>";
   html += "<button class='bearing-button' onclick='setCardnal(135)'>SE</button>";
   html += "</div>";
-
 
   html += "<h2>Current Bearing</h2>";
   html += "<p class='bearing' id='bearing'></p>";
