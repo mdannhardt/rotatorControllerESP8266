@@ -199,7 +199,7 @@ void handleRoot() {
 
   html += "function calibrate() {";
   html += "  var xhttp = new XMLHttpRequest();";
-  html += "  xhttp.open('POST', '/reset', true);";
+  html += "  xhttp.open('POST', '/calibrate', true);";
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
   html += "  xhttp.send('calibrate');";
   html += "}";
@@ -241,12 +241,14 @@ void handleRoot() {
   html += "</div>";
   html += "</div>";// Close grid-container
 
-  html += "<button onclick='calibrate()'>Calibrate</button></br>";
+  html += "<button onclick='calibrate()'>Calibrate North</button></br>";
 
-  html += "<br /><br /><br>Set WiFi Router SSID and Password: ";
+  html += "<br />    WiFi Router SSID: ";
   html += "<input type='text' id='ssidInput' value='" + getWifiSSID() + "' oninput='setSSID(this.value)'>";
+  html += "<br />WiFi Router Password: ";
   html += "<input type='text' id='passwordInput' value='" + String(!isConfigured() ? "no_cfg" : "**************") + "' oninput='setPassword(this.value)'>";
-  html += "<button onclick='reset()'>Save and Reboot</button></br>";
+  html += "<br /><button onclick='reset()'>Save SSID, Password and Reboot</button>";
+  html += "<br /><i>Refresh browser after reboot to see assigned IP address</i>";
 
   String ip =  WiFi.status() != WL_CONNECTED ? String("Not Connected") : WiFi.localIP().toString();
 
