@@ -555,7 +555,7 @@ void checkRotateComplete() {
  */
 CMD setNewBearing(int newBearing)
 {
-	if (newBearing < 1 || newBearing > 360)
+	if (newBearing < 0 || newBearing > 360)
 		Serial.println("ERR:New bearing degrees out of range.");
 	else
 	{

@@ -86,12 +86,16 @@ void handleRoot() {
   Serial.println("handleRoot()");
   String html = "<html><head>";
 
-  html += "<style>";
-  html += "  body { font-family: Arial, sans-serif; }";
+  html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
 
-//  html += "  .bearing { font-size: 48px; font-weight: bold; text-align: center; color: #0066cc; }";
+  html += "<style>";
+
+  html += "  body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }";
+  html += "  .container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }";
+  html += "  .bearing-container { margin-bottom: 20px; }";
   html += "  .bearing { font-size: 48px; font-weight: bold; color: #0066cc; }";
 
+  html += "  .grid-container { width: 100%; max-width: 300px; margin: 0 auto; }";
   html += "  .button-grid {";
   html += "    display: grid;";
   html += "    grid-template-columns: repeat(3, 1fr);";
@@ -183,7 +187,8 @@ void handleRoot() {
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.onreadystatechange = function() {";
   html += "    if (this.readyState == 4 && this.status == 200) {";
-  html += "      location.reload();"; // Add this line to force a page reload
+  	  	  	  	 // Force a page reload so that the new value is displayed in the set bearing input field
+  html += "      location.reload();";
   html += "    }";
   html += "  };";
   html += "  xhttp.open('POST', '/newBearing', true);";
@@ -191,17 +196,35 @@ void handleRoot() {
   html += "  xhttp.send('newBearing=' + value);";
   html += "}";
 
+  html += "function calibrate() {";
+  html += "  var xhttp = new XMLHttpRequest();";
+  html += "  xhttp.open('POST', '/reset', true);";
+  html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
+  html += "  xhttp.send('calibrate');";
+  html += "}";
+
+
   html += "setInterval(updateBearing, 1000);";
 
   html += "</script>";
 
   html += "</head><body>";
 
-  html += "<b>Set Bearing ";
+  /*
+  html += "<h3>Current Bearing</h3>";
+  html += "<p class='bearing' id='bearing'></p>";
+  html += "</div>";
+*/
+  html += "<div class='bearing-container'>";
+  html += "<h3>Current Bearing</h3>";
+  html += "<p class='bearing' id='bearing'></p>";
+
+  html += "<b>Set Bearing</b>";
   html += "<input type='number' id='newBearingInput' step='5' value='" + String(NewTargetBearing) + "'>";
   html += "<button onclick='setNewBearing()'>Go</button></b>";
 
-  html += "<br /><div class='button-grid'>";
+  html += "<div class='grid-container'>";
+  html += "<div class='button-grid'>";
   html += "<button class='bearing-button' onclick='setCardnal(315)'>NW</button>";
   html += "<button class='bearing-button' onclick='setCardnal(1)'>North</button>";
   html += "<button class='bearing-button' onclick='setCardnal(45)'>NE</button>";
@@ -212,18 +235,20 @@ void handleRoot() {
   html += "<button class='bearing-button' onclick='setCardnal(180)'>South</button>";
   html += "<button class='bearing-button' onclick='setCardnal(135)'>SE</button>";
   html += "</div>";
+  html += "</div>";// Close grid-container
 
-  html += "<h2>Current Bearing</h2>";
-  html += "<p class='bearing' id='bearing'></p>";
+  html += "<button onclick='calibrate()'>Calibrate</button></br>";
 
   html += "<br /><br /><br>Set WiFi Router SSID and Password: ";
   html += "<input type='text' id='ssidInput' value='" + getWifiSSID() + "' oninput='setSSID(this.value)'>";
-  html += "<input type='text' id='passwordInput' value='" + getWifiPassword() + "' oninput='setPassword(this.value)'>";
+  html += "<input type='text' id='passwordInput' value='" + String(!isConfigured() ? "no_cfg" : "**************") + "' oninput='setPassword(this.value)'>";
   html += "<button onclick='reset()'>Save and Reboot</button></br>";
 
   String ip =  WiFi.status() != WL_CONNECTED ? String("Not Connected") : WiFi.localIP().toString();
 
   html += "<div class='ip-address' id='statusMessage'>" + String("Assigned IP Address from router: ") + ip + "</div></br>";
+
+  html += "</div>";
 
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -270,10 +295,21 @@ void handleReset() {
 
 extern void rotateStop(int why);
 void handleStop() {
-  Serial.println("handleStop()");
+//  Serial.println("handleStop()");
   if (server.hasArg("stop")) {
     server.send(200, "text/plain", "Stopping");
     rotateStop(0);
+  } else {
+    server.send(400, "text/plain", "Missing parameter");
+  }
+}
+
+extern void calculateDeclination(void);
+void handleCalibrate() {
+  Serial.println("handleCalibrate()");
+  if (server.hasArg("calibrate")) {
+    server.send(200, "text/plain", "Calibrating");
+    calculateDeclination();
   } else {
     server.send(400, "text/plain", "Missing parameter");
   }
@@ -347,6 +383,7 @@ void createWiFiAP() {
 	server.on("/password", handlePassword);
 	server.on("/bearing", handleCurrentBearing);
 	server.on("/newBearing", handleSetBearing);
+	server.on("/calibrate", handleCalibrate);
 
 	server.begin();
 	Serial.println("Server started");
