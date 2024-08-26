@@ -82,6 +82,7 @@ void serverLoop() {
   server.handleClient();
 }
 
+extern String ESP_Id;
 void handleRoot() {
   Serial.println("handleRoot()");
   String html = "<html><head>";
@@ -203,6 +204,14 @@ void handleRoot() {
   html += "  xhttp.send('calibrate');";
   html += "}";
 
+  html += "function openPopout() {";
+  html += "  var popoutURL = window.location.href;";
+  html += "  var popoutParams = 'width=350,height=400,toolbar=no,location=no,status=no,menubar=no,scrollbars=no,resizable=yes';";
+  html += "  var popout = window.open(popoutURL, 'Hex Rotator', popoutParams);";
+  html += "  if (popout) {";
+  html += "    window.close();";
+  html += "    }";
+  html += "}";
 
   html += "setInterval(updateBearing, 1000);";
 
@@ -210,13 +219,8 @@ void handleRoot() {
 
   html += "</head><body>";
 
-  /*
-  html += "<h3>Current Bearing</h3>";
-  html += "<p class='bearing' id='bearing'></p>";
-  html += "</div>";
-*/
   html += "<div class='bearing-container'>";
-  html += "<h3>Current Bearing</h3>";
+  html += "<h3>Current Bearing for "+ ESP_Id + "</h3>";
   html += "<p class='bearing' id='bearing'></p>";
 
   html += "<b>Set Bearing</b>";
@@ -247,6 +251,8 @@ void handleRoot() {
   String ip =  WiFi.status() != WL_CONNECTED ? String("Not Connected") : WiFi.localIP().toString();
 
   html += "<div class='ip-address' id='statusMessage'>" + String("Assigned IP Address from router: ") + ip + "</div></br>";
+
+  html += "<button onclick='openPopout()'>Open in Popout</button>";
 
   html += "</div>";
 
