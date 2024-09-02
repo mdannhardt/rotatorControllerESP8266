@@ -83,6 +83,7 @@ void serverLoop() {
 }
 
 extern String ESP_Id;
+extern char *version;
 void handleRoot() {
   Serial.println("handleRoot()");
   String html = "<html><head>";
@@ -92,9 +93,10 @@ void handleRoot() {
   html += "<style>";
 
   html += "  body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }";
+  html += "  h2, h3 { margin: 10px 0 5px 0; }";
   html += "  .container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }";
-  html += "  .bearing-container { margin-bottom: 20px; }";
-  html += "  .bearing { font-size: 48px; font-weight: bold; color: #0066cc; }";
+  html += "  .bearing-container { margin-bottom: 10px 0; }";
+  html += "  .bearing { font-size: 48px; font-weight: bold; color: #0066cc;  margin: 0; }";
 
   html += "  .grid-container { width: 100%; max-width: 300px; margin: 0 auto; }";
   html += "  .button-grid {";
@@ -102,6 +104,26 @@ void handleRoot() {
   html += "    grid-template-columns: repeat(3, 1fr);";
   html += "    gap: 10px;";
   html += "    max-width: 300px;";
+  html += "  }";
+
+  html += "  .ip-address {";
+  html += "    font-size: 14px;";
+  html += "    color: #333;";
+  html += "    margin: 20px 0;";
+  html += "    padding: 10px;";
+  html += "    background-color: #f0f0f0;";
+  html += "    border-radius: 5px;";
+  html += "  }";
+
+  html += "  .go-button {";
+  html += "    padding: 0px 25;";
+  html += "    text-align: center;";
+  html += "    text-decoration: none;";
+  html += "    display: inline-block;";
+  html += "    font-size: 16px;";
+  html += "    margin: 4px 2px;";
+  html += "    cursor: pointer;";
+  html += "    border-radius: 5px;";
   html += "  }";
 
   html += "  .bearing-button {";
@@ -130,6 +152,8 @@ void handleRoot() {
   html += "    background-color: #f0f0f0;";
   html += "    border-radius: 5px;";
   html += "  }";
+
+  html += "  .bearing-input { width: 80px; }";
 
   html += "</style>";
 
@@ -206,7 +230,7 @@ void handleRoot() {
 
   html += "function openPopout() {";
   html += "  var popoutURL = window.location.href;";
-  html += "  var popoutParams = 'width=350,height=400,toolbar=no,location=no,status=no,menubar=no,scrollbars=no,resizable=yes';";
+  html += "  var popoutParams = 'width=325,height=350,toolbar=no,location=no,status=no,menubar=no,scrollbars=no,resizable=yes';";
   html += "  var popout = window.open(popoutURL, 'Hex Rotator', popoutParams);";
   html += "  if (popout) {";
   html += "    window.close();";
@@ -223,9 +247,11 @@ void handleRoot() {
   html += "<h3>Current Bearing for "+ ESP_Id + "</h3>";
   html += "<p class='bearing' id='bearing'></p>";
 
-  html += "<b>Set Bearing</b>";
-  html += "<input type='number' id='newBearingInput' step='5' value='" + String(NewTargetBearing) + "'>";
-  html += "<button onclick='setNewBearing()'>Go</button></b>";
+  html += "<b style='font-size: 16px;'>Set Bearing</b>";
+  html += "<input type='number' style='font-size: 16px;' id='newBearingInput' class='bearing-input' min='0' max='359' step='5' value='" + String(NewTargetBearing) + "'>";
+  html += "<button class='go-button' onclick='setNewBearing()'>Go</button>";
+  html += "<br /> ";
+  html += "<br /> ";
 
   html += "<div class='grid-container'>";
   html += "<div class='button-grid'>";
@@ -257,6 +283,7 @@ void handleRoot() {
   html += "<button onclick='openPopout()'>Open in Popout</button>";
 
   html += "</div>";
+  html += "<div class='ip-address' id='version'>" + String(version) + "</div></br>";
 
   html += "</body></html>";
   server.send(200, "text/html", html);

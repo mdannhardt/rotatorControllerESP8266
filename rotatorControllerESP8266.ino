@@ -20,6 +20,7 @@
  *                  Enable mDNS
  * 2.0.0 2024-05-05 Removed manual configuration of AP, SSID and password. Replaced with web server based HTML
  *                  entry of SSID and password stored to EEPROM.
+ * 3.0.0 2024-09-01 Replace web interface with one supporting the current bearing reading and able to set new targets.
  */
 
 #include "rotatorControllerESP8266.h"
@@ -43,7 +44,7 @@
 #include <QMC5883L.h>
 #endif
 
-const char *version = "BuddiHex Rotator Firmware version 2.0.0";
+const char *version = "Rotator Firmware version 3.0.0";
 
 // Program constants
 const int ROTATE_CW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
