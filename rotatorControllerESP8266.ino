@@ -91,6 +91,7 @@ int getAzimuth()
 {
 	int azimuth = 0;
 #ifdef COMPASS_OFFICAL
+	compass.read();
 	azimuth = compass.getAzimuth();
 #else
 	if ( compass.ready() )
@@ -689,6 +690,7 @@ void calculateDeclination()
 	int currentBearing;
 
 #ifdef COMPASS_OFFICAL
+	compass.read();
 	currentBearing = compass.getAzimuth();
 #else
 	currentBearing = compass.readHeading();
