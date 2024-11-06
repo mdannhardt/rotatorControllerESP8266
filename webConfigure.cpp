@@ -175,7 +175,7 @@ void handleRoot() {
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.open('POST', '/ssid', true);";
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
-  html += "  xhttp.send('ssid=' + ssid);";
+  html += "  xhttp.send('ssid=' + encodeURIComponent(ssid));";
   html += "}";
 
   html += "function setPassword() {";
@@ -183,7 +183,7 @@ void handleRoot() {
   html += "  var xhttp = new XMLHttpRequest();";
   html += "  xhttp.open('POST', '/password', true);";
   html += "  xhttp.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');";
-  html += "  xhttp.send('password=' + password);";
+  html += "  xhttp.send('password=' + encodeURIComponent(password));";
   html += "}";
 
   html += "function reset() {";
