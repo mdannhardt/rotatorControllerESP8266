@@ -1,0 +1,6 @@
+eclipse.preferences.version=1
+environment/project/io.sloeber.core.sketch.0/append=true
+environment/project/io.sloeber.core.sketch.0/appendContributed=true
+environment/project/io.sloeber.core.sketch.0/build.debug_level/delimiter=;
+environment/project/io.sloeber.core.sketch.0/build.debug_level/operation=replace
+environment/project/io.sloeber.core.sketch.0/build.debug_level/value=-DDEBUG_ESP_TLS_MEM

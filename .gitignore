@@ -1,4 +1,6 @@
 *
+!.settings/*
+!.*
 !*.ino
 !*.c
 !*.cpp
