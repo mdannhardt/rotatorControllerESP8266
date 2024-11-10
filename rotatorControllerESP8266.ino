@@ -21,6 +21,7 @@
  * 2.0.0 2024-05-05 Removed manual configuration of AP, SSID and password. Replaced with web server based HTML
  *                  entry of SSID and password stored to EEPROM.
  * 3.0.0 2024-09-01 Replace web interface with one supporting the current bearing reading and able to set new targets.
+ * 3.0.1 2024-09-01 Fix premature Stuck bug.
  */
 
 #include "rotatorControllerESP8266.h"
@@ -44,7 +45,7 @@
 #include <QMC5883L.h>
 #endif
 
-const char *version = "Rotator Firmware version 3.0.0";
+const char *version = "Rotator Firmware version 3.0.1";
 
 // Program constants
 const int ROTATE_CW = 15; // GPIO-15 of NodeMCU esp8266 connecting to IN1 of L293D;
@@ -86,7 +87,6 @@ int Declination = 0;
 #endif
 
 
-
 int getAzimuth()
 {
 	int azimuth = 0;
@@ -94,13 +94,18 @@ int getAzimuth()
 	compass.read();
 	azimuth = compass.getAzimuth();
 #else
+	// Wait the compass to become ready
+	for ( int i = 0 && !compass.ready(); i < 5; i++ )
+		delay(50);
+
 	if ( compass.ready() )
 		azimuth = compass.readHeading(); // returns 1 - 360
 	else
+	{
+		Serial.println("Compass not ready");
 		return azimuth;
+	}
 #endif
-
-	int currentBearing = azimuth;
 
 #ifdef QMC5883_AT_90
 	azimuth -= 90;
@@ -400,6 +405,7 @@ void rotate() {
 	Serial.printf("Rotate %s to %d", clockwise ? "CW" : "CCW", targetBearing);	Serial.println();
 
 	// Setup to check for a stuck rotator
+	stuckBearingCheck = getAzimuth();
 	stuckTimer = checkRotationTimer = millis();
 }
 
@@ -434,7 +440,7 @@ bool checkRotationStuck(int currentBearing)
 	// If still rotating, check if stuck
 	if (rotating) {
 		unsigned long timeCurrent = millis();
-		if (stuckTimer > timeCurrent) // roll over. Just rest and ignore this interval
+		if (stuckTimer > timeCurrent) // roll over. Just reset and ignore this interval
 			stuckTimer = timeCurrent;
 		if (timeCurrent - stuckTimer > STUCK_TIME)
 		{
